@@ -10,7 +10,7 @@ python -m unittest discover -s tests -v
 ```
 
 默认运行不依赖 FFmpeg 的单元测试，集成测试明确标记 skipped。
-完整集成测试需要 FFmpeg 的 libtheora/libvorbis 编码器、libx264、FFV1、AAC。
+完整集成测试需要 FFmpeg 的 libtheora/libvorbis 编码器、libx264、libx265、SVT-AV1 或 libaom-av1、FFV1、AAC。
 
 ```powershell
 $env:OMVTOOL_INTEGRATION = '1'
@@ -39,6 +39,7 @@ src/omvtool/
   cli.py          公共 CLI、检查、批量、依赖诊断
   header.py       OMV/Theora 结构读取
   converter.py    平面重建、FFmpeg 流式转换、内嵌音频
+  encoding.py     软件/硬件编码参数、实际编码探测
   runtime.py      外部程序定位、冻结运行时环境处理
 tests/            可公开的合成/单元测试
 examples/         二进制管道示例
@@ -59,6 +60,20 @@ docs/             使用、格式、来源、开发、发布说明
 相关依据见 [PyInstaller 外部程序说明](https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html#launching-external-programs-from-the-frozen-application)。
 
 源码包由 setuptools 明确只发现 `src/omvtool`；二进制发布包使用文件白名单，
-不打包研究工程、测试生成媒体、本机路径清单或临时目录。
+不打包测试生成媒体、私人路径清单或临时目录。
 
 Python 源码已按 Black 风格排版；生成文件和验证产物由 `.gitignore` 排除。
+
+## 硬件集成测试
+
+设置 `OMVTOOL_HARDWARE_TEST=1` 可启用 GPU 转换测试；通过
+`OMVTOOL_HARDWARE_ENCODERS` 指定逗号分隔列表（默认 h264_nvenc,hevc_nvenc,av1_nvenc）。
+该列表中的编码器必须实际可用，失败不会被跳过。普通 CI 不要求 GPU，软件
+HEVC/AV1 转换和 auto 后端回退逻辑仍会测试。
+
+```powershell
+$env:OMVTOOL_INTEGRATION = '1'
+$env:OMVTOOL_HARDWARE_TEST = '1'
+$env:OMVTOOL_HARDWARE_ENCODERS = 'h264_nvenc,hevc_nvenc,av1_nvenc'
+python -m unittest discover -s tests -v
+```

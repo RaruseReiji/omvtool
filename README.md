@@ -1,12 +1,12 @@
 # OMVTool
 
-将 **SiglusEngine `.omv`** 流式转换为 MP4 或无损 MKV，正确处理已验证的 BGR、BGR+alpha 和 YUV 三种存储模式，无需中间 PNG。
+将 **SiglusEngine `.omv`** 流式转换为 H.264、HEVC、AV1 MP4 或无损 MKV，正确处理 BGR、BGR+alpha 和 YUV 三种存储模式，无需中间 PNG。
 
-支持透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。它是独立 Python 实现，并非原 `xmoezzz/omvdecoder` 的新版本。当前版本 **0.3.0**。
+支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.4.0**。
 
 ## 快速开始
 
-需要 FFmpeg 和 ffprobe 在 PATH 中；FFmpeg 应支持 Theora 解码、libx264、FFV1、AAC 及常规视频滤镜。
+需要 FFmpeg 和 ffprobe。**直接把 `ffmpeg.exe`、`ffprobe.exe` 放到 `omvtool.exe` 旁边即可，无需设置 PATH。** macOS/Linux 使用不带 `.exe` 的程序，并保留执行权限。也支持当前工作目录、PATH 和环境变量指定路径。FFmpeg 的编码器/驱动支持可用 `doctor` 检查。
 
 **可执行文件**：下载与系统/架构相符的发布包，解压后执行 `omvtool`（Windows 为 `omvtool.exe`）。可执行文件包含 Python 和 NumPy，不包含 FFmpeg。未签名的构建可能触发系统提示；macOS 也可能要求在系统设置中允许运行。
 
@@ -20,6 +20,13 @@ omvtool doctor
 ```console
 # 高质量 H.264 MP4，默认 CRF 16 / slow；自动保留内嵌音频
 omvtool convert "movie.omv" -o "movie.mp4"
+
+# HEVC / AV1 软件编码
+omvtool convert "movie.omv" -o "hevc.mp4" --codec hevc
+omvtool convert "movie.omv" -o "av1.mp4" --codec av1
+
+# NVIDIA 硬件编码；也可用 --encoder auto 自动探测
+omvtool convert "movie.omv" -o "av1_gpu.mp4" --codec av1 --encoder nvenc
 
 # 无损保存解码后像素，透明效果保留 alpha
 omvtool convert "effect.omv" -o "effect.mkv" --format ffv1
@@ -49,8 +56,10 @@ PowerShell 在当前目录运行发布版时，使用 `./omvtool.exe`。源码�
 
 当前支持 OMV 头大小 `0xa8`、版本 `0x101`，内嵌 Theora 4:4:4，模式 0/1/2。未知布局会报错，不能保证适用于所有 Visual Arts 游戏或所有 OMV 版本；也不处理资源包提取、音频文件自动配乐或加密格式。
 
-研究阶段检查了九个游戏的 532 个文件：529 个非空文件首两帧成功重建；代表性完整视频及三类像素往返测试通过。全部样本没有内嵌音轨；音频功能另用合成的双 Vorbis 音轨样本验证。详见[验证范围](docs/format.md#验证范围)。发布目录和测试不包含游戏素材。
+检查了九个游戏的 532 个文件：529 个非空文件首两帧成功重建；代表性完整视频及三类像素往返测试通过。全部样本没有内嵌音轨；音频功能另用合成的双 Vorbis 音轨样本验证。详见[验证范围](docs/format.md#验证范围)。发布目录和测试不包含游戏素材。
 
 MP4 为有损输出；FFV1 保存的是 Theora **解码后**的像素，不能恢复源编码已经损失的细节。源压缩码流需要用 `extract` 保存。普通 MP4 不保存透明通道，默认合成到黑底。
 
-MIT 许可证仅适用于本项目独立实现；第三方运行库另见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+硬件编码支持 NVENC、QSV、AMF、VAAPI、VideoToolbox，具体取决于 FFmpeg 构建、显卡和驱动。Theora 输入通常由 CPU 解码，颜色/alpha 重建也在 CPU 完成。用 `omvtool doctor --test-encoders` 可实际试编码；编译进 FFmpeg 不等于本机可用。
+
+感谢 [xmoezzz/omvdecoder](https://github.com/xmoezzz/omvdecoder)、[SiglusExtract](https://github.com/xmoezzz/SiglusExtract)、[SiglusSceneScriptUtility](https://github.com/Jirehlov/SiglusSceneScriptUtility) 等项目提供的格式和实现参考，详见[参考来源](docs/references.md)。MIT 许可证；第三方运行库另见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

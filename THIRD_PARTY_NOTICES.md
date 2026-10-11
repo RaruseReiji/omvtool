@@ -1,8 +1,7 @@
 # Third-party components
 
-OMVTool's independent Python implementation is distributed under MIT. No upstream
-omvdecoder Rust source, SiglusEngine source, game assets or proprietary libraries
-are included. Format research references are listed in `docs/references.md`.
+OMVTool is distributed under MIT. Format and implementation references and
+acknowledgements are listed in `docs/references.md`.
 
 Binary builds contain CPython, NumPy and the PyInstaller bootloader. Their licenses
 remain applicable independently of OMVTool's MIT license. The build script copies
@@ -15,5 +14,5 @@ OpenBLAS and other components; consult the notices from that particular wheel.
 - [PyInstaller license and bootloader exception](https://pyinstaller.org/en/stable/license.html)
 
 FFmpeg and ffprobe are external executables and are **not bundled**. Users supply
-their own installation. Its license depends on its build configuration, including
+their own installation, either beside OMVTool or elsewhere on their system. Its license depends on its build configuration, including
 optional GPL components such as libx264. See [FFmpeg legal information](https://ffmpeg.org/legal.html).

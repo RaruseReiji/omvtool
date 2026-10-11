@@ -1,19 +1,15 @@
-# 整理版验证记录
+# 验证记录
 
-日期：2026-10-12。当前在 Windows x64 / Python 3.12.4 上验证。
+日期：2026-10-12。Windows x64 / Python 3.12.4 / NumPy 2.5.4；FFmpeg 2026-10-08。
 
-- 独立虚拟环境安装（NumPy 2.5.4），`doctor` 检查通过。
-- 13 项 unittest 通过，包括 5 项 FFmpeg 集成测试（内部覆盖三模式/多输出组合）。
-- 将集成测试入口切换为最终 Windows 冻结版后，同一套 13 项测试再次通过。
-- 静止重复帧裁切测试发现 seek 无首帧问题，已改为恢复 CFR 后裁切，并通过回归。
+- 21 项 unittest 通过，包括三种模式的 H.264/HEVC/AV1 软件编码、FFV1 无损往返、双音轨、裁切、提取、RGBA 管道、目录处理与防覆盖。
+- libx265、libsvtav1、libaom-av1 分别完成三种模式的短片转换、全片解码、帧数/尺寸/音轨检查。
+- NVIDIA RTX 4070 Ti SUPER / 驱动 610.88：NVENC H.264、HEVC、AV1 完成三种模式的短片转换；自动选择路径通过。
+- QSV H.264、HEVC 完成三种模式的短片转换。QSV AV1、AMF 与 VAAPI 在本机探测为不可用，未声称实际验证其转换；VideoToolbox 需要 macOS 验证。
+- 本地 FFmpeg 查找优先级、显式无效路径、auto 不可用时的软件回退、显式编码器不静默回退均有回归测试。
+- Theora 输入 `--hwaccel auto` 转换通过，不代表使用了 Theora 硬件解码。
 
-- Windows x64 PyInstaller 6.22.3 单文件构建、PE 架构与子命令启动检查通过，冻结版 doctor 通过。
-- 冻结版分别转换三种模式的真实资源，各两帧 FFV1 解码 SHA-256 与研究阶段结果一致。
-- 外层 1088 / 可见 1080 的真实 mode 2 样本输出 1920×1080 / 两帧，未被误判 alpha。
-- Python wheel 和 sdist 构建通过，源码包未包含媒体、研究证据或私人路径。
-- actionlint 1.7.12 检查 GitHub Actions 工作流通过；发布包附依赖许可证和 SHA-256。
-
-本地解释器来自 Anaconda 的 Python，实际 GitHub Actions 使用 setup-python；
-Windows 包适合本机先行测试，正式分发应审核 hosted runner 产物。
-Linux/macOS/ARM64 工作流已准备，尚未推送到 GitHub 执行。
-历史游戏样本验证与局限见 `docs/format.md`，不作为本次 CI 已跑过的结果。
+- Windows x64 单文件程序通过架构/启动检查，以冻结版 CLI 运行同一套 21 项测试全部通过。
+- 解压发布包并清空 PATH，仅使用程序旁的 ffmpeg.exe/ffprobe.exe：doctor 和真实 1920×1080 OMV 的 HEVC/AV1 NVENC 三帧转换通过。
+- Python wheel/sdist 构建与 actionlint 工作流检查通过；发布包附依赖许可证和 SHA-256。
+Linux/macOS/ARM64 工作流尚待 GitHub Actions 执行。游戏样本验证范围与局限见 [格式说明](docs/format.md#验证范围)。

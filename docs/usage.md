@@ -13,7 +13,11 @@ omvtool convert --help
 omvtool doctor
 ```
 
-FFmpeg/ffprobe 须在 PATH 中。可通过环境变量 `OMVTOOL_FFMPEG`、
+将 `ffmpeg.exe` 和 `ffprobe.exe` 放在 `omvtool.exe` 同目录即可（macOS/Linux 不带 `.exe`，须可执行）。源码调用也可放在项目根目录或当前工作目录。
+
+查找顺序：显式环境变量 → 程序/启动脚本所在目录 → 源码项目根目录（源码调用）→ 当前工作目录 → PATH。显式变量无效会报错，不会改用别的程序。
+
+可通过环境变量 `OMVTOOL_FFMPEG`、
 `OMVTOOL_FFPROBE` 指定各自的完整可执行文件路径，不要在变量值外再加引号。
 示例（PowerShell）：
 
@@ -23,8 +27,7 @@ $env:OMVTOOL_FFPROBE = 'C:\Tools\ffmpeg\bin\ffprobe.exe'
 omvtool doctor
 ```
 
-`doctor` 检查两个程序能否启动，以及转换所需解码器、编码器和滤镜；
-缺少任一项返回 1。它检查完整功能所需组件，单独 `extract` 不需要 FFmpeg。
+`doctor` 检查两个程序、基础编码器和滤镜，列出软件/硬件编码器及输入硬件加速方法；基础依赖缺失返回 1。HEVC/AV1 与硬件编码器为可选功能。`doctor --test-encoders` 会逐个实际编码一帧，标记 PASS 或 UNAVAILABLE；可选后端不可用不会使基础诊断失败。单独 `extract` 不需要 FFmpeg。
 不要求 FFmpeg 带 libtheora **编码器**，该编码器仅供开发集成测试生成样本。
 
 ## 一般转换
@@ -40,9 +43,16 @@ INPUT 可以是一个 `.omv` 文件或目录。单文件默认输出 MP4，OUTPU
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `-o, --output` | 必填 | 输出文件或目录 |
-| `--format mp4/ffv1` | mp4 | H.264 MP4 / FFV1 MKV |
-| `--crf 0..51` | 16 | x264 质量，越小画质/体积通常越高；仅 MP4 |
-| `--preset` | slow | x264 速度选项 ultrafast、superfast、veryfast、faster、fast、medium、slow、slower、veryslow；仅 MP4 |
+| `--format mp4/ffv1` | mp4 | MP4 / 无损 FFV1 MKV |
+| `--codec h264/hevc/av1` | h264 | MP4 视频编码；FFV1 不使用 |
+| `--encoder` | software | software、auto、nvenc、qsv、amf、vaapi、videotoolbox 或对应 FFmpeg 编码器名 |
+| `--crf` | H.264 16 / HEVC 20 / AV1 28 | 软件质量；H.264/HEVC 0..51，AV1 0..63，越低通常越清晰 |
+| `--quality` | 硬件 20 / VideoToolbox 65 | 硬件后端的质量参数，见下表 |
+| `--bitrate` | 无 | 目标视频码率，例如 8M；与 crf/quality 互斥 |
+| `--preset` | 随编码器 | 编码速度/压缩预设，见下表 |
+| `--encode-device` | 驱动默认 | NVENC GPU 序号、QSV 设备或 VAAPI render node |
+| `--hwaccel` | none | FFmpeg 输入硬件加速；Theora 通常仍用 CPU |
+| `--hwaccel-device` | 无 | FFmpeg 输入加速设备；须同时指定 hwaccel |
 | `--start SECONDS` | 0 | 从指定秒开始，须非负有限数 |
 | `--frames COUNT` | 全部剩余帧 | 输出帧数上限，须正整数 |
 | `--yuv-range full/limited` | full | mode 2 的输入范围；mode 0/1 不使用 |
@@ -58,15 +68,51 @@ omvtool convert effect.omv -o effect.mkv --format ffv1
 omvtool convert movie.omv -o alternate.mp4 --yuv-range limited --matrix 709
 ```
 
-CRF 16 是观看和体积之间的默认选择，不是质量保证。CRF 0 也仍受 YUV420p
+各编码器的质量数字不能直接横向比较，应先用短片段试编码。CRF 0 也仍受 YUV420p
 颜色抽样和颜色转换影响；需要逐像素保存请用 FFV1。mode 2 的默认 full/601
 来自所检查转换源码及样本，无法替代与具体游戏渲染结果对照。
 
 输出 MP4 使用 BT.709 limited-range YUV420p，写入颜色标记和 faststart。
-奇数宽高补到偶数以兼容 x264/播放器，最多多一列或一行。FFV1 保持原可见尺寸。
+奇数宽高补到偶数以兼容编码器/播放器，最多多一列或一行。FFV1 保持原可见尺寸。
 帧率使用 Theora 分子/分母，恢复重复帧并按 OMV 帧表控制总长度。
 `--start` 向下取到最近视频帧边界，音频采用相同的实际起点，帧数上限不会超过剩余片长。
 为正确处理静止画面的 Theora 重复帧，会从头解码再裁切；大 start 值需要等待前段解码。
+
+## HEVC、AV1 与硬件编码
+
+`--format` 选择输出方案，`--codec` 选择 MP4 中的视频编码。H.264、HEVC、AV1 都使用 `.mp4` 后缀，音频策略相同。HEVC 写入 `hvc1` 标记；播放器仍须支持相应编码。
+
+```console
+omvtool convert movie.omv -o hevc.mp4 --codec hevc --crf 20 --preset slow
+omvtool convert movie.omv -o av1.mp4 --codec av1 --crf 28 --preset 6
+omvtool convert movie.omv -o hevc_gpu.mp4 --codec hevc --encoder nvenc --quality 18 --preset p6
+omvtool convert movie.omv -o av1_gpu.mp4 --codec av1 --encoder nvenc
+omvtool convert movie.omv -o av1_auto.mp4 --codec av1 --encoder auto
+omvtool convert movie.omv -o intel.mp4 --codec hevc --encoder qsv
+omvtool convert movie.omv -o amd.mp4 --codec hevc --encoder amf --bitrate 8M
+omvtool convert movie.omv -o apple.mp4 --codec hevc --encoder videotoolbox --bitrate 8M
+omvtool convert movie.omv -o linux.mp4 --codec hevc --encoder vaapi --encode-device /dev/dri/renderD128
+```
+
+默认 `--encoder software`：H.264 用 libx264，HEVC 用 libx265，AV1 优先 libsvtav1，缺少时用 libaom-av1。也可指定完整名称，如 `--encoder av1_nvenc` 或 `--encoder libaom-av1`；须与 codec 匹配。
+
+| 后端 | 默认质量/参数 | preset | 设备 |
+|---|---|---|---|
+| libx264 / libx265 | CRF 16 / 20，越小质量越高 | 默认 slow；ultrafast 到 veryslow | CPU |
+| libsvtav1 | CRF 28 | 默认 6；0..13，越大越快，具体范围依本地版本 | CPU |
+| libaom-av1 | CRF 28，b:v=0 | 默认 6；0..8，映射 cpu-used | CPU |
+| NVENC | VBR CQ 20，b:v=0；quality 0..51，0 为自动 | 默认 p5；p1 最快到 p7 最慢 | encode-device 为非负 GPU 序号 |
+| QSV | global_quality 20，越小质量越高，0..51 | 默认 medium；veryfast/faster/fast/medium/slow/slower/veryslow | 可指定 qsv_device，格式取决于平台 |
+| AMF | CQP，I/P QP=20，越小质量越高；本工具 0..51 | 可传后端 quality 预设；不指定时采用 FFmpeg 默认 | 驱动默认 |
+| VAAPI | CQP，global_quality 20；0..51 | 不使用 preset | 默认 /dev/dri/renderD128；支持 encode-device |
+| VideoToolbox | q:v=65，0..100，越大质量越高 | 不使用 preset | 驱动默认；不允许软件回退 |
+
+VideoToolbox 提供 H.264/HEVC，当前工具未配置其 AV1 后端。所有后端都可用 `--bitrate` 切换到目标码率模式；具体码率与文件大小仍受内容、编码器和容器影响。`--quality` 是后端原生参数，既不等于 CRF，也不能跨显卡直接比较。
+
+`--encoder auto` 按平台候选顺序做真实试编码，并检查当前视频尺寸；成功后才选择硬件，无可用设备则使用软件。macOS 尝试 VideoToolbox；其他平台依次尝试 NVENC、QSV、AMF、VAAPI。auto 接受默认参数或 `--bitrate`，要指定 quality/crf/preset/设备请明确选择后端。明确指定后端失败时会报错，不会静默换编码器。测试通过也不能保证长时间编码不会遇到驱动/资源错误；最终编码出错时同样报错。
+
+**硬件解码与编码分别控制。** 输出硬件编码不要求输入硬件解码。常见显卡/FFmpeg 没有 Theora 硬件解码器，故这些 OMV 的解码通常仍由 CPU 完成，mode 0/1 颜色与 alpha 重建也在 CPU 进行。
+`--hwaccel auto` 交给 FFmpeg 尝试输入加速并按其策略回退；可显式选 cuda、qsv、d3d11va、dxva2、vaapi、videotoolbox、vulkan，不兼容时可能报错。滤镜使用软件帧，不构成全 GPU 零拷贝管线。FFV1 是软件无损编码，不与 codec/encoder/crf/quality/bitrate/preset/encode-device 组合。
 
 ## 透明通道
 
@@ -83,7 +129,7 @@ FFmpeg 提取 alpha 验证。FFV1 通常比 MP4 大很多，但无需先落地�
 
 ## 音频
 
-只处理 **内嵌 Ogg 音轨**。本机研究样本没有内嵌音频，所以正常输出仅视频。
+只处理 **内嵌 Ogg 音轨**。源文件无音轨时输出仅视频，有多条音轨时全部保留。
 不会搜索旁边的 BGM、猜测配乐或替代游戏脚本混音。
 
 | `--audio` | MP4 | FFV1/MKV |
@@ -174,16 +220,3 @@ python examples/pipe_to_ffmpeg.py movie.omv custom.mp4
 未知模式、非 4:4:4 或 alpha 尺寸不匹配会拒绝转换；请保留完整错误和
 inspect 信息用于排查。发布问题时不必上传整部游戏资源。
 字幕、章节、附加图片、交错多视频流和动态尺寸变化尚未作为支持目标。
-
-## 从研究版命令迁移
-
-| 研究版 | 整理版 |
-|---|---|
-| `python omvtool.py input.omv output.mp4` | `omvtool convert input.omv -o output.mp4` |
-| `python omvtool.py input.omv output.mkv --format ffv1` | `omvtool convert input.omv -o output.mkv --format ffv1` |
-| `python omvtool.py input.omv --format inspect` | `omvtool inspect input.omv --json` |
-| `python omvtool.py input.omv --format rgba` | `omvtool pipe input.omv` |
-| `python omvtool.py input.omv output.ogv --format ogv` | `omvtool extract input.omv -o output.ogv` |
-
-研究版 inspect 曾向 stderr 打印 JSON；整理版 JSON 规范输出到 stdout。
-质量、音频和颜色参数沿用原名称，裁切改为恢复重复帧后向下取帧边界。

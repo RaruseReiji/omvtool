@@ -2,8 +2,7 @@
 
 ## 六平台原生构建
 
-`.github/workflows/build.yml` 参考已有 Python 工具工作流的矩阵、Python 架构检查、
-PyInstaller 和二进制头验证，新增合成集成测试、源码包、依赖许可证与发布草稿。
+`.github/workflows/build.yml` 使用 Python 架构检查、PyInstaller 和二进制头验证，包含合成集成测试、源码包、依赖许可证与发布草稿。
 PyInstaller 不是交叉编译器，每个目标在自己的 runner 原生构建。
 
 | 目标 | Runner | Python 架构 |
@@ -38,16 +37,12 @@ Windows ARM64/部分 ARM runner 的可用性受 GitHub 仓库类型和账号方�
 Linux 基于 Ubuntu 24.04，不能承诺兼容更老的 glibc；macOS 最低运行版本依赖
 实际 Python/NumPy wheel。未做代码签名、macOS notarization 或 Windows 签名。
 
-首次公开应使用这个独立目录建立新仓库，**不要推送旧研究仓库的历史**；
-旧历史包括上游 Rust、私人路径和游戏截图。新工程没有关联远程地址。
-项目 MIT 是为独立实现准备的许可证方案；发布前可按作者意愿修改署名或许可证。
-
 ## 正式发布步骤
 
-1. 检查 README、CHANGELOG、许可证署名和版本；确认将发布的是本独立工程。
+1. 检查 README、CHANGELOG、许可证署名和版本；检查文档与产物版本一致。
 2. 创建/关联目标 GitHub 仓库，提交并推送 main；等待六平台 Actions 结果，下载测试目标平台。
 3. 更新 `pyproject.toml` 和 `src/omvtool/__init__.py` 到同一版本，提交，再创建相应标签。
-4. 例如 `git tag v0.3.0` 后 `git push origin v0.3.0` 将触发构建；本次整理没有执行这些操作。
+4. 例如 `git tag v0.4.0` 后 `git push origin v0.4.0` 将触发构建。
 5. 在 GitHub 审核草稿的产物、SHA256SUMS、说明和兼容范围，然后手动 Publish。
 
 同名 release 已存在时 `gh release create` 会失败，避免不经检查修改已有公开 release；
@@ -74,7 +69,7 @@ Linux runner 缺 CPython 许可证时，脚本从 Python 官方仓库按当前�
 校验 Windows 下载包示例：
 
 ```powershell
-Get-FileHash .\omvtool-0.3.0-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\omvtool-0.4.0-windows-x64.zip -Algorithm SHA256
 ```
 
 macOS/Linux 解压 tar.gz 保留执行权限；若复制过程中丢失，执行 `chmod +x omvtool`。

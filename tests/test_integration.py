@@ -13,6 +13,7 @@ import numpy as np
 
 from omvtool.converter import input_args, layout, read_frame, unpack
 from omvtool.runtime import executable, external_env
+from omvtool.encoding import encoder_list, SOFTWARE
 
 
 def command(*args, check=True):
@@ -27,11 +28,11 @@ def cli(*args, check=True):
 
 def fixture(root, mode, static=False):
     ogg = root / f"mode{mode}.ogv"
-    height = 64 if mode == 1 else 48
+    height = 256 if mode == 1 else 192
     source = (
-        f"color=c=red:size=64x{height}:rate=30000/1001"
+        f"color=c=red:size=256x{height}:rate=30000/1001"
         if static
-        else f"testsrc2=size=64x{height}:rate=30000/1001"
+        else f"testsrc2=size=256x{height}:rate=30000/1001"
     )
     command(
         executable("ffmpeg"),
@@ -80,8 +81,8 @@ def fixture(root, mode, static=False):
         (0, 168),
         (4, 257),
         (0x28, mode),
-        (0x2C, 64),
-        (0x30, 48),
+        (0x2C, 256),
+        (0x30, 192),
         (0x4C, pages),
         (0x50, 12),
     ):
@@ -123,6 +124,122 @@ class IntegrationTests(unittest.TestCase):
             ).stdout
         )
 
+    def test_hevc_av1_and_input_acceleration(self):
+        available = encoder_list(executable("ffmpeg"))
+        for codec in ("hevc", "av1"):
+            encoders = [e for e in SOFTWARE[codec] if e in available]
+            self.assertTrue(
+                encoders, f"Integration environment needs a software {codec} encoder"
+            )
+            for encoder in encoders:
+                for mode, source in enumerate(self.sources):
+                    with self.subTest(codec=codec, encoder=encoder, mode=mode):
+                        out = self.root / f"{encoder}-{mode}.mp4"
+                        cli(
+                            "convert",
+                            source,
+                            "-o",
+                            out,
+                            "--codec",
+                            codec,
+                            "--encoder",
+                            encoder,
+                            "--preset",
+                            "8" if codec == "av1" else "ultrafast",
+                            "--frames",
+                            "6",
+                            "--hwaccel",
+                            "auto",
+                        )
+                        data = self.probe(out)
+                        video = next(
+                            s for s in data["streams"] if s["codec_type"] == "video"
+                        )
+                        self.assertEqual(video["codec_name"], codec)
+                        self.assertEqual(int(video["nb_read_frames"]), 6)
+                        self.assertEqual((video["width"], video["height"]), (256, 192))
+                        self.assertEqual(
+                            [
+                                s["codec_name"]
+                                for s in data["streams"]
+                                if s["codec_type"] == "audio"
+                            ],
+                            ["aac", "aac"],
+                        )
+                        command(
+                            executable("ffmpeg"),
+                            "-v",
+                            "error",
+                            "-i",
+                            str(out),
+                            "-f",
+                            "null",
+                            "-",
+                        )
+
+    @unittest.skipUnless(
+        os.environ.get("OMVTOOL_HARDWARE_TEST") == "1",
+        "Set OMVTOOL_HARDWARE_TEST=1 to verify local GPU encoders",
+    )
+    def test_hardware_encoders(self):
+        # Explicitly configured list avoids silently treating missing GPUs as success.
+        requested = os.environ.get(
+            "OMVTOOL_HARDWARE_ENCODERS", "h264_nvenc,hevc_nvenc,av1_nvenc"
+        ).split(",")
+        for encoder in requested:
+            codec = encoder.split("_", 1)[0]
+            for mode, source in enumerate(self.sources):
+                with self.subTest(encoder=encoder, mode=mode):
+                    out = self.root / f"hardware-{encoder}-{mode}.mp4"
+                    cli(
+                        "convert",
+                        source,
+                        "-o",
+                        out,
+                        "--codec",
+                        codec,
+                        "--encoder",
+                        encoder,
+                        "--frames",
+                        "6",
+                    )
+                    data = self.probe(out)
+                    video = next(
+                        s for s in data["streams"] if s["codec_type"] == "video"
+                    )
+                    self.assertEqual(video["codec_name"], codec)
+                    self.assertEqual(int(video["nb_read_frames"]), 6)
+                    self.assertEqual((video["width"], video["height"]), (256, 192))
+                    self.assertEqual(
+                        len([s for s in data["streams"] if s["codec_type"] == "audio"]),
+                        2,
+                    )
+                    command(
+                        executable("ffmpeg"),
+                        "-v",
+                        "error",
+                        "-i",
+                        str(out),
+                        "-f",
+                        "null",
+                        "-",
+                    )
+        out = self.root / "hardware-auto.mp4"
+        auto_codec = requested[0].split("_", 1)[0]
+        result = cli(
+            "convert",
+            self.sources[1],
+            "-o",
+            out,
+            "--codec",
+            auto_codec,
+            "--encoder",
+            "auto",
+            "--frames",
+            "3",
+        )
+        self.assertIn(f"ENCODER: {auto_codec}_".encode(), result.stderr)
+
     def test_all_modes_and_audio(self):
         for mode, source in enumerate(self.sources):
             for fmt in ("mp4", "ffv1"):
@@ -138,8 +255,7 @@ class IntegrationTests(unittest.TestCase):
                         out,
                         "--format",
                         fmt,
-                        "--preset",
-                        "fast",
+                        *(["--preset", "fast"] if fmt == "mp4" else []),
                     )
                     data = self.probe(out)
                     video = next(
@@ -147,7 +263,7 @@ class IntegrationTests(unittest.TestCase):
                     )
                     audio = [s for s in data["streams"] if s["codec_type"] == "audio"]
                     self.assertEqual(int(video["nb_read_frames"]), 12)
-                    self.assertEqual((video["width"], video["height"]), (64, 48))
+                    self.assertEqual((video["width"], video["height"]), (256, 192))
                     self.assertLess(
                         abs(float(data["format"]["duration"]) - 12 * 1001 / 30000), 0.06
                     )
@@ -262,7 +378,7 @@ class IntegrationTests(unittest.TestCase):
                     out.read_bytes(), source.read_bytes()[info["ogg_offset"] :]
                 )
                 rgba = cli("pipe", source, "--frames", "2").stdout
-                self.assertEqual(len(rgba), 2 * 64 * 48 * 4)
+                self.assertEqual(len(rgba), 2 * 256 * 192 * 4)
                 mkv = self.root / f"roundtrip{mode}.mkv"
                 cli("convert", source, "-o", mkv, "--format", "ffv1", "--frames", "2")
                 if mode != 2:

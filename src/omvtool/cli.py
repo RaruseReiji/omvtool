@@ -10,6 +10,8 @@ from pathlib import Path
 from . import __version__
 from .converter import convert, layout, probe_media
 from .runtime import executable, external_env
+from .encoding import HARDWARE, SOFTWARE, encoder_list, probe_encoder, validate
+from argparse import Namespace
 
 
 def options(parser):
@@ -17,6 +19,23 @@ def options(parser):
     parser.add_argument("--frames", type=int, metavar="COUNT")
     parser.add_argument("--yuv-range", choices=["full", "limited"], default="full")
     parser.add_argument("--matrix", choices=["601", "709"], default="601")
+    parser.add_argument(
+        "--hwaccel",
+        default="none",
+        choices=[
+            "none",
+            "auto",
+            "cuda",
+            "qsv",
+            "d3d11va",
+            "dxva2",
+            "vaapi",
+            "videotoolbox",
+            "vulkan",
+        ],
+        help="FFmpeg input acceleration; Theora normally uses software decoding",
+    )
+    parser.add_argument("--hwaccel-device", help="FFmpeg input hardware device")
 
 
 def parser():
@@ -32,21 +51,28 @@ def parser():
     c.add_argument("input", type=Path)
     c.add_argument("-o", "--output", type=Path, required=True)
     c.add_argument("--format", choices=["mp4", "ffv1"], default="mp4")
-    c.add_argument("--crf", type=int, default=16)
     c.add_argument(
-        "--preset",
-        default="slow",
-        choices=[
-            "ultrafast",
-            "superfast",
-            "veryfast",
-            "faster",
-            "fast",
-            "medium",
-            "slow",
-            "slower",
-            "veryslow",
-        ],
+        "--codec",
+        choices=["h264", "hevc", "av1"],
+        default="h264",
+        help="Video codec for MP4",
+    )
+    c.add_argument(
+        "--encoder",
+        default="software",
+        help="software, auto, nvenc, qsv, amf, vaapi, videotoolbox, or an FFmpeg encoder name",
+    )
+    quality = c.add_mutually_exclusive_group()
+    quality.add_argument(
+        "--crf", type=int, help="Software CRF: default H.264 16, HEVC 20, AV1 28"
+    )
+    quality.add_argument(
+        "--quality", type=int, help="Hardware quality value (backend-specific)"
+    )
+    quality.add_argument("--bitrate", help="Target video bitrate, e.g. 8M")
+    c.add_argument("--preset", help="Encoder-specific preset; see the manual")
+    c.add_argument(
+        "--encode-device", help="NVENC GPU index, QSV device, or VAAPI render node"
     )
     c.add_argument(
         "--alpha",
@@ -75,11 +101,18 @@ def parser():
     )
     r.add_argument("input", type=Path)
     options(r)
-    sub.add_parser("doctor", help="Check FFmpeg, ffprobe and required codecs/filters")
+    d = sub.add_parser(
+        "doctor", help="Check FFmpeg, codecs, filters and hardware encoders"
+    )
+    d.add_argument(
+        "--test-encoders",
+        action="store_true",
+        help="Actually encode one frame with each listed encoder",
+    )
     return p
 
 
-def doctor():
+def doctor(test_encoders=False):
     failed = False
     for name in ("ffmpeg", "ffprobe"):
         try:
@@ -129,6 +162,45 @@ def doctor():
                         + (f"MISSING {', '.join(sorted(missing))}" if missing else "OK")
                     )
                     failed |= bool(missing)
+                available = encoder_list(path)
+                for codec in SOFTWARE:
+                    for enc in (*SOFTWARE[codec], *HARDWARE[codec].values()):
+                        if enc not in available:
+                            continue
+                        status = "compiled"
+                        if test_encoders:
+                            a = Namespace(
+                                codec=codec,
+                                selected_encoder=enc,
+                                crf=None,
+                                quality=None,
+                                bitrate=None,
+                                preset=None,
+                                encode_device=None,
+                            )
+                            ok, reason = probe_encoder(a)
+                            status = (
+                                "PASS"
+                                if ok
+                                else "UNAVAILABLE: "
+                                + (
+                                    reason.splitlines()[-1]
+                                    if reason
+                                    else "probe failed"
+                                )
+                            )
+                        print(f"  {codec}: {enc}: {status}")
+                hw = subprocess.run(
+                    [path, "-hide_banner", "-hwaccels"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    env=external_env(),
+                )
+                print("  " + hw.stdout.strip().replace("\n", ", "))
+                print(
+                    "  Theora input normally uses software decoding; hardware encoder availability depends on the device/driver."
+                )
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"{name}: ERROR: {exc}", file=sys.stderr)
             failed = True
@@ -180,14 +252,21 @@ def input_files(source):
 
 def dispatch(a, p):
     if a.command == "doctor":
-        return doctor()
+        return doctor(a.test_encoders)
     if a.command == "inspect":
         return inspect_input(a.input, a.json)
     # Normalize all subcommands to the conversion core's small options structure.
     defaults = dict(
         format="mp4",
-        crf=16,
-        preset="slow",
+        crf=None,
+        preset=None,
+        codec="h264",
+        encoder="software",
+        quality=None,
+        bitrate=None,
+        encode_device=None,
+        hwaccel="none",
+        hwaccel_device=None,
         alpha="black",
         audio="auto",
         start=0,
@@ -202,10 +281,16 @@ def dispatch(a, p):
     if (
         not math.isfinite(a.start)
         or a.start < 0
-        or not 0 <= a.crf <= 51
         or (a.frames is not None and a.frames <= 0)
     ):
-        p.error("Require finite --start >= 0, --crf 0..51 and --frames > 0")
+        p.error("Require finite --start >= 0 and --frames > 0")
+    if a.hwaccel_device and a.hwaccel == "none":
+        p.error("--hwaccel-device requires --hwaccel")
+    if a.command == "convert":
+        try:
+            validate(a)
+        except ValueError as exc:
+            p.error(str(exc))
     if a.command == "pipe":
         a.format = "rgba"
         if a.input.is_dir():

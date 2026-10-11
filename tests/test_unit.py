@@ -123,9 +123,11 @@ class LayoutTests(unittest.TestCase):
             ["convert", "x", "-o", "y.mp4", "--frames", "0"],
             ["convert", "x", "-o", "y.mp4", "--crf", "52"],
         ):
-            with self.subTest(args=args), contextlib.redirect_stderr(
-                io.StringIO()
-            ), self.assertRaises(SystemExit) as caught:
+            with (
+                self.subTest(args=args),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as caught,
+            ):
                 main(args)
             self.assertEqual(caught.exception.code, 2)
 

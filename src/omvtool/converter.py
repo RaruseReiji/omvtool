@@ -16,6 +16,7 @@ import tempfile
 import numpy as np
 from .header import inspect
 from .runtime import executable, external_env
+from .encoding import select_encoder, video_args, pixel_filter, device_args
 
 
 def layout(path):
@@ -85,9 +86,16 @@ def read_frame(stream, size):
     return b
 
 
-def input_args(m, start):
+def input_args(m, start, options=None, encoding=False):
     url = f"subfile,,start,{m['ogg_offset']},,:{m['path']}"
     args = [executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if options:
+        if encoding:
+            args += device_args(options)
+        if options.hwaccel != "none":
+            args += ["-hwaccel", options.hwaccel]
+            if options.hwaccel_device:
+                args += ["-hwaccel_device", options.hwaccel_device]
     # Decode from the first frame: a seek into Theora repeat packets may have
     # no new AVFrame to initialize the output. Trim after CFR reconstruction.
     return args + ["-i", url, "-map", "0:v:0", "-an"]
@@ -176,6 +184,14 @@ def run_checked(cmd):
 
 def convert(source, output, args):
     m = layout(source)
+    if args.format == "mp4":
+        args.selected_encoder = select_encoder(
+            args, m["output_width"], m["output_height"]
+        )
+        # Validate the full profile before creating temporary files.
+        video_args(args)
+        device_args(args)
+        print(f"ENCODER: {args.selected_encoder}", file=sys.stderr)
     media = probe_media(m) if args.format in ("mp4", "ffv1", "inspect") else None
     if media is not None:
         m["audio_streams"] = [
@@ -241,18 +257,18 @@ def convert(source, output, args):
                 shutil.copyfileobj(src, dst, 1024 * 1024)
         elif args.format == "mp4" and m["mode"] == 2:
             # Native YUV path: no RGB round trip, no Python frame copying.
-            cmd = input_args(m, args.start)
+            cmd = input_args(m, args.start, args, encoding=True)
             cmd += ["-frames:v", str(frame_limit)]
             vf = (
                 timing + "," + f"scale=in_range={args.yuv_range}:out_range=limited:"
                 f"in_color_matrix=bt{args.matrix}:out_color_matrix=bt709,"
-                "pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p,setsar=1"
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2,setsar=1," + pixel_filter(args)
             )
             cmd += ["-vf", vf] + mp4_args(args) + ["-y", str(tmp)]
             run_checked(cmd)
         elif args.format == "ffv1" and m["mode"] == 2:
             # Preserve decoded YUV samples exactly, including 4:4:4 chroma.
-            cmd = input_args(m, args.start)
+            cmd = input_args(m, args.start, args)
             cmd += ["-frames:v", str(frame_limit)]
             cmd += [
                 "-vf",
@@ -298,10 +314,11 @@ def convert(source, output, args):
                     "-an",
                 ]
                 if args.format == "mp4":
+                    enc[1:1] = device_args(args)
                     enc += [
                         "-vf",
                         "scale=in_range=full:out_range=limited:out_color_matrix=bt709,"
-                        "pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p,setsar=1",
+                        "pad=ceil(iw/2)*2:ceil(ih/2)*2,setsar=1," + pixel_filter(args),
                     ] + mp4_args(args)
                 else:
                     enc += [
@@ -318,7 +335,7 @@ def convert(source, output, args):
                     enc + [str(tmp)], stdin=subprocess.PIPE, env=external_env()
                 )
                 sink = encoder.stdin
-            cmd = input_args(m, args.start)
+            cmd = input_args(m, args.start, args)
             cmd += [
                 "-frames:v",
                 str(frame_limit),
@@ -393,23 +410,4 @@ def convert(source, output, args):
 
 
 def mp4_args(args):
-    return [
-        "-c:v",
-        "libx264",
-        "-preset",
-        args.preset,
-        "-crf",
-        str(args.crf),
-        "-pix_fmt",
-        "yuv420p",
-        "-color_range",
-        "tv",
-        "-colorspace",
-        "bt709",
-        "-color_primaries",
-        "bt709",
-        "-color_trc",
-        "bt709",
-        "-movflags",
-        "+faststart",
-    ]
+    return video_args(args) + ["-movflags", "+faststart"]

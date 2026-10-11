@@ -1,11 +1,13 @@
 # OMVTool
 
-An independent streaming SiglusEngine OMV converter. Reconstructs the supported
+A streaming SiglusEngine OMV converter with H.264, HEVC and AV1 output. Reconstructs
 BGR, packed BGR+alpha and YUV layouts, preserves rational frame rates and repeated
 frames, and optionally retains all embedded audio tracks. No intermediate PNGs.
 
-Requires external **FFmpeg and ffprobe**. The FFmpeg build must support Theora,
-libx264, FFV1, AAC and the filters checked by `omvtool doctor`.
+Requires **FFmpeg and ffprobe**. Place them beside the OMVTool executable (Windows:
+`ffmpeg.exe`, `ffprobe.exe`); no PATH configuration is needed. The working directory,
+PATH and explicit environment overrides are also supported. Run `omvtool doctor`
+to check codecs and filters, or `omvtool doctor --test-encoders` to test encoding.
 Python source installation requires Python 3.10+ and NumPy. Standalone binaries
 bundle Python and NumPy, but not FFmpeg.
 
@@ -13,6 +15,9 @@ bundle Python and NumPy, but not FFmpeg.
 python -m pip install .
 omvtool doctor
 omvtool convert input.omv -o output.mp4
+omvtool convert input.omv -o hevc.mp4 --codec hevc
+omvtool convert input.omv -o av1.mp4 --codec av1
+omvtool convert input.omv -o av1_gpu.mp4 --codec av1 --encoder nvenc
 omvtool convert effect.omv -o effect.mkv --format ffv1
 omvtool convert mov -o converted
 omvtool inspect input.omv --json
@@ -24,6 +29,13 @@ Default MP4: H.264 CRF 16, slow preset, limited-range BT.709 YUV420p, black alph
 composite. Embedded AAC is copied; other audio becomes AAC 256 kb/s per track.
 FFV1/MKV preserves decoded RGBA for modes 0/1 or YUV444 samples for mode 2 and
 copies all embedded audio. MP4 is lossy and does not retain alpha.
+
+HEVC defaults to libx265 CRF 20 / slow; AV1 prefers libsvtav1 CRF 28 / preset 6,
+with libaom-av1 as a fallback. Choose `--encoder nvenc`, `qsv`, `amf`, `vaapi` or
+`videotoolbox` for hardware encoding. `--encoder auto` tests hardware before using
+it and falls back to software; explicit choices fail if unavailable. Theora normally
+decodes in software, and color/alpha reconstruction uses the CPU. Hardware quality
+uses `--quality` (backend-specific); `--bitrate 8M` sets a target bitrate. See the manual.
 
 `omvtool pipe input.omv` writes headerless packed RGBA frames to binary stdout.
 It contains video only; read size and rational frame rate using `inspect`.
@@ -44,3 +56,6 @@ All paths are local; no assets are uploaded.
 See the [Chinese full manual](docs/usage.md), [format notes](docs/format.md),
 [references/comparison](docs/references.md), and [release instructions](docs/release.md).
 MIT; bundled components retain their own licenses.
+
+Thanks to omvdecoder, SiglusExtract and SiglusSceneScriptUtility for format and
+implementation references; see [references and acknowledgements](docs/references.md).

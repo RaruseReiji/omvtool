@@ -1,5 +1,7 @@
 # 参考来源与工具对比
 
+感谢 xmoezzz、Jirehlov 及相关项目贡献者公开的工具和资料，为 OMV 结构、平面布局和转换流程提供了有用参考；感谢 FFmpeg、Xiph.Org、NumPy 和 PyInstaller 提供的基础工具。
+
 检查日期：2026-10-12。对比依据是仓库文档、指定版本源码和本机样本分析；
 未安装运行第三方 GUI 或旧 exe，不据此声称所有现有工具都不可用。
 
@@ -10,7 +12,7 @@
 | [SiglusSceneScriptUtility](https://github.com/Jirehlov/SiglusSceneScriptUtility) | 分析、提取 OGV、回封装 OMV、批量 | 适合外壳/索引操作，不提供本次三模式的完整重建转码链；文档称回封装只保留第一条 Theora，不保留 Vorbis/Opus |
 | [SSSU-GUI](https://github.com/yanmuuuu/SiglusSceneScriptUtility-GUI) | 资源浏览、音频工具、OMV 提取后调用播放器 | 图形界面方便，但提取 OGV 并不重建 BGR/alpha 特殊平面 |
 | [SiglusEngine / omvCuter.py](https://github.com/hiroshil/SiglusEngine/blob/master/omvCuter.py) | 找到 OggS 后去外壳 | 不重建颜色/alpha；所检脚本一次读完整文件 |
-| OMVTool（本项目） | mode 0/1/2 分派、流式 MP4/FFV1、RGBA stdout、精确帧率与重复帧、内嵌音频 | 不提供 GUI、资源包提取或回封装；只支持已验证布局；FFmpeg 为外部依赖 |
+| OMVTool（本项目） | mode 0/1/2 分派、H.264/HEVC/AV1 软件及硬件编码、FFV1、RGBA stdout、精确帧率与重复帧、内嵌音频 | CLI；只支持已验证布局；FFmpeg 为外部依赖，可放程序旁 |
 
 若仅需 OGV 提取或回封装，SSSU 是已有选择。mode 2 提取后可以组合 FFmpeg 进行
 颜色解释与转码；mode 0/1 仍需平面重建。在所检查项目中没有找到已验证同时覆盖
@@ -24,11 +26,11 @@
 - [SSSU video.py](https://github.com/Jirehlov/SiglusSceneScriptUtility/blob/9364d8517fab02b5ef68103dc6e16b707967d186/src/siglus_ssu/video.py)：外层头、page/frame 表结构。
 - [SSSU 视频模块说明](https://github.com/Jirehlov/SiglusSceneScriptUtility/blob/main/manual.md#-v----video--work-with-omv-video-files)：提取/分析/回封装语义及音频限制。
 - [FFmpeg filters](https://ffmpeg.org/ffmpeg-filters.html)、[protocols / subfile](https://ffmpeg.org/ffmpeg-protocols.html#subfile)：按偏移读取、fps/tpad/scale 等。
+- [FFmpeg 编码器说明](https://ffmpeg.org/ffmpeg-codecs.html)、[硬件加速输入选项](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)：libx265、SVT-AV1、QSV 等和 hwaccel；具体可用参数以本地 `ffmpeg -h encoder=NAME` 为准。
 - [Theora specification](https://www.theora.org/doc/Theora.pdf)：Theora 标识、画面尺寸与有理数帧率。
 
 当日 GitHub API 返回 omvdecoder 的 4 个公开 fork：BaoLyHoseki 与上游相同；
 Livscrit、lunaswd 的新增变更为 README/CI；killvxk/omvdecoder-xmoezzz 落后上游。
 没有发现相关解码修复。fork 状态会变化，这只是当次可见范围。
 
-本项目引用格式事实及算法说明，未复制上述仓库源码或未获明确许可的 Rust 工程。
-第三方软件及游戏素材不适用本项目 MIT 许可证。
+第三方软件保留各自许可证，见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
