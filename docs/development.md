@@ -1,0 +1,64 @@
+# 开发与测试
+
+## 环境
+
+```console
+python -m venv .venv
+# Windows: .venv\Scripts\activate ; Unix: source .venv/bin/activate
+python -m pip install -e ".[build]"
+python -m unittest discover -s tests -v
+```
+
+默认运行不依赖 FFmpeg 的单元测试，集成测试明确标记 skipped。
+完整集成测试需要 FFmpeg 的 libtheora/libvorbis 编码器、libx264、FFV1、AAC。
+
+```powershell
+$env:OMVTOOL_INTEGRATION = '1'
+python -m unittest discover -s tests -v
+```
+
+```sh
+OMVTOOL_INTEGRATION=1 python -m unittest discover -s tests -v
+```
+
+同时设置 `OMVTOOL_TEST_BINARY` 为已构建程序的绝对路径，可让集成测试调用冻结版
+CLI；单元测试及 Python 管道示例仍使用已安装的 Python 包。
+
+测试临时生成 Theora + 双 Vorbis 的 Ogg，包装成 OMV 0x101，退出后删除。
+不含游戏数据。合成 OMV 的索引项是零填充，仅用来验证本工具读取偏移/帧数与
+解码重建路径，不保证能被游戏引擎回放，也不测试索引表回封装。
+
+验证范围：模式/尺寸拒绝、alpha 余数、YUV、截断裸帧、大小写扩展名、参数验证；
+三模式 MP4/MKV、多音轨波形、分数帧率、静止重复帧裁切、无损往返、标准 stdout、
+原 payload 提取、目录错误继续及禁止覆盖。
+
+## 结构
+
+```text
+src/omvtool/
+  cli.py          公共 CLI、检查、批量、依赖诊断
+  header.py       OMV/Theora 结构读取
+  converter.py    平面重建、FFmpeg 流式转换、内嵌音频
+  runtime.py      外部程序定位、冻结运行时环境处理
+tests/            可公开的合成/单元测试
+examples/         二进制管道示例
+scripts/          原生打包与可执行文件架构检查
+docs/             使用、格式、来源、开发、发布说明
+```
+
+公共稳定接口为命令行；Python 内部函数还不承诺 API 稳定。
+使用 `omvtool --version`、`pyproject.toml`、`src/omvtool/__init__.py` 同步版本。
+发布标签必须为 `v` 加包版本，构建脚本会校验。
+
+## 依赖与构建
+
+运行依赖 NumPy，FFmpeg 作为外部进程；不需要 Pillow、Rust 或游戏 DLL。
+运行时依赖范围允许 NumPy 1/2，构建工具版本固定，实际安装版本保存在每个发布包
+`build-info.json`。这不是依赖完全锁定的可重复字节构建；runner 和 wheel 升级会改变产物。
+冻结程序调用 FFmpeg 前清理 PyInstaller 注入的库路径，Windows 清除 DLL 搜索目录。
+相关依据见 [PyInstaller 外部程序说明](https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html#launching-external-programs-from-the-frozen-application)。
+
+源码包由 setuptools 明确只发现 `src/omvtool`；二进制发布包使用文件白名单，
+不打包研究工程、测试生成媒体、本机路径清单或临时目录。
+
+Python 源码已按 Black 风格排版；生成文件和验证产物由 `.gitignore` 排除。

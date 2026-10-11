@@ -1,0 +1,15 @@
+/.venv/
+/build/
+/dist/
+/release/
+*.spec
+*.egg-info/
+__pycache__/
+*.py[cod]
+*.partial-*
+*.omv
+*.ogv
+*.mp4
+*.mkv
+*.png
+*.jpg
