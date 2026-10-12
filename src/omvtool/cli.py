@@ -10,11 +10,25 @@ from pathlib import Path
 from . import __version__
 from .converter import convert, layout, probe_media
 from .runtime import executable, external_env
-from .encoding import HARDWARE, SOFTWARE, encoder_list, probe_encoder, validate
+from .encoding import (
+    HARDWARE,
+    SOFTWARE,
+    encoder_list,
+    probe_encoder,
+    probe_alpha,
+    validate,
+)
+from .diagnostics import diagnose
 from argparse import Namespace
 
 
 def options(parser):
+    parser.add_argument(
+        "--force-mode",
+        type=int,
+        choices=[0, 1, 2],
+        help="Override declared mode; dimensions and sampling are still validated",
+    )
     parser.add_argument("--start", type=float, default=0, metavar="SECONDS")
     parser.add_argument("--frames", type=int, metavar="COUNT")
     parser.add_argument("--yuv-range", choices=["full", "limited"], default="full")
@@ -76,9 +90,9 @@ def parser():
     )
     c.add_argument(
         "--alpha",
-        choices=["black", "discard"],
+        choices=["black", "discard", "preserve"],
         default="black",
-        help="MP4 background; lossless output always preserves alpha",
+        help="MP4 alpha handling; preserve requires HEVC/libx265 with working alpha support",
     )
     c.add_argument("--audio", choices=["auto", "copy", "none"], default="auto")
     options(c)
@@ -86,6 +100,7 @@ def parser():
         "inspect", help="Show layout, frame rate and embedded audio streams"
     )
     i.add_argument("input", type=Path)
+    i.add_argument("--force-mode", type=int, choices=[0, 1, 2])
     i.add_argument(
         "--json",
         action="store_true",
@@ -96,6 +111,7 @@ def parser():
     )
     e.add_argument("input", type=Path)
     e.add_argument("-o", "--output", type=Path, required=True)
+    e.add_argument("--force-mode", type=int, choices=[0, 1, 2])
     r = sub.add_parser(
         "pipe", help="Write headerless RGBA video to binary stdout (one file)"
     )
@@ -108,6 +124,17 @@ def parser():
         "--test-encoders",
         action="store_true",
         help="Actually encode one frame with each listed encoder",
+    )
+    report = sub.add_parser(
+        "diagnose",
+        help="Create an opt-in local structural JSON report; never upload automatically",
+    )
+    report.add_argument("input", type=Path)
+    report.add_argument("-o", "--output", type=Path, required=True)
+    report.add_argument(
+        "--consent",
+        action="store_true",
+        help="Consent to collecting file size and numeric header fields only; excludes paths, names and media bytes",
     )
     return p
 
@@ -190,6 +217,21 @@ def doctor(test_encoders=False):
                                 )
                             )
                         print(f"  {codec}: {enc}: {status}")
+                if test_encoders and "libx265" in available:
+                    alpha_options = Namespace(
+                        codec="hevc",
+                        selected_encoder="libx265",
+                        alpha="preserve",
+                        crf=None,
+                        quality=None,
+                        bitrate=None,
+                        preset=None,
+                        encode_device=None,
+                    )
+                    ok, reason = probe_alpha(alpha_options)
+                    print(
+                        f"  HEVC alpha (libx265): {'PASS' if ok else 'UNAVAILABLE'}: {reason}"
+                    )
                 hw = subprocess.run(
                     [path, "-hide_banner", "-hwaccels"],
                     capture_output=True,
@@ -207,12 +249,12 @@ def doctor(test_encoders=False):
     return int(failed)
 
 
-def inspect_input(source, as_json):
+def inspect_input(source, as_json, force_mode=None):
     files = input_files(source)
     rows, failed = [], False
     for src in files:
         try:
-            m = layout(src)
+            m = layout(src, force_mode)
             media = probe_media(m)
             m["audio_streams"] = [
                 s for s in media["streams"] if s["codec_type"] == "audio"
@@ -253,8 +295,10 @@ def input_files(source):
 def dispatch(a, p):
     if a.command == "doctor":
         return doctor(a.test_encoders)
+    if a.command == "diagnose":
+        return diagnose(a.input, a.output, a.consent)
     if a.command == "inspect":
-        return inspect_input(a.input, a.json)
+        return inspect_input(a.input, a.json, a.force_mode)
     # Normalize all subcommands to the conversion core's small options structure.
     defaults = dict(
         format="mp4",
@@ -273,6 +317,7 @@ def dispatch(a, p):
         frames=None,
         yuv_range="full",
         matrix="601",
+        force_mode=None,
         output=None,
     )
     for key, value in defaults.items():
@@ -323,7 +368,11 @@ def dispatch(a, p):
                 print(f"SKIP existing: {dst}", file=sys.stderr)
                 continue
         try:
-            if directory and a.format != "ogv" and layout(src)["frames"] == 0:
+            if (
+                directory
+                and a.format != "ogv"
+                and layout(src, a.force_mode)["frames"] == 0
+            ):
                 print(f"SKIP empty placeholder: {src}", file=sys.stderr)
                 continue
             convert(src, dst, a)

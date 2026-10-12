@@ -28,7 +28,7 @@ omvtool --help
 Default MP4: H.264 CRF 16, slow preset, limited-range BT.709 YUV420p, black alpha
 composite. Embedded AAC is copied; other audio becomes AAC 256 kb/s per track.
 FFV1/MKV preserves decoded RGBA for modes 0/1 or YUV444 samples for mode 2 and
-copies all embedded audio. MP4 is lossy and does not retain alpha.
+copies all embedded audio. MP4 is lossy. HEVC alpha is opt-in with `--alpha preserve` and requires a working alpha-enabled libx265 build; an actual encode/decode check runs first.
 
 HEVC defaults to libx265 CRF 20 / slow; AV1 prefers libsvtav1 CRF 28 / preset 6,
 with libaom-av1 as a fallback. Choose `--encoder nvenc`, `qsv`, `amf`, `vaapi` or
@@ -54,8 +54,10 @@ nonzero exit code if any item fails. Single-file conversions refuse overwrites.
 All paths are local; no assets are uploaded.
 
 See the [Chinese full manual](docs/usage.md), [format notes](docs/format.md),
-[references/comparison](docs/references.md), and [release instructions](docs/release.md).
+and [references/comparison](docs/references.md).
 MIT; bundled components retain their own licenses.
 
 Thanks to omvdecoder, SiglusExtract and SiglusSceneScriptUtility for format and
 implementation references; see [references and acknowledgements](docs/references.md).
+
+Unknown layouts stop with a diagnostic hint. `omvtool diagnose INPUT -o report.json --consent` creates a local JSON of structural numeric fields only; review it before manually attaching it to an issue. No upload is performed. `--force-mode 0/1/2` overrides the declared mode while keeping version, dimensions and sampling checks. See the full manual for details.

@@ -4,6 +4,8 @@ import functools
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from copy import copy
 
 from .runtime import executable, external_env
@@ -57,6 +59,15 @@ def backend(encoder):
 
 
 def validate(a):
+    if getattr(a, "alpha", "black") == "preserve":
+        if (
+            a.format != "mp4"
+            or a.codec != "hevc"
+            or a.encoder not in ("software", "libx265")
+        ):
+            raise ValueError(
+                "--alpha preserve requires --codec hevc --encoder software (libx265); use FFV1 for lossless alpha"
+            )
     if a.format == "ffv1":
         if (
             a.codec != "h264"
@@ -100,6 +111,8 @@ def device_args(a):
 
 
 def pixel_filter(a):
+    if getattr(a, "alpha", "black") == "preserve":
+        return "format=yuva420p"
     b = backend(a.selected_encoder)
     if b == "vaapi":
         return "format=nv12,hwupload"
@@ -196,7 +209,11 @@ def video_args(a):
             out += ["-b:v", a.bitrate] if a.bitrate else ["-q:v", q]
     out += [
         "-pix_fmt",
-        "vaapi" if b == "vaapi" else ("nv12" if b == "qsv" else "yuv420p"),
+        (
+            "+yuva420p"
+            if getattr(a, "alpha", "black") == "preserve"
+            else ("vaapi" if b == "vaapi" else ("nv12" if b == "qsv" else "yuv420p"))
+        ),
         "-color_range",
         "tv",
         "-colorspace",
@@ -209,6 +226,93 @@ def video_args(a):
     if a.codec == "hevc":
         out += ["-tag:v", "hvc1"]
     return out
+
+
+def probe_alpha(a):
+    """Require real MP4 alpha round-trip; a listed pixel format is insufficient."""
+    if a.selected_encoder != "libx265":
+        return False, "Only libx265 alpha is currently supported"
+    return _probe_alpha(executable("ffmpeg"), tuple(video_args(a)))
+
+
+@functools.lru_cache(maxsize=16)
+def _probe_alpha(ffmpeg, args):
+    width, height = 256, 192
+    # Constant RGB with an independent alpha ramp catches opaque fallback.
+    row = b"".join(bytes((80, 120, 160, x)) for x in range(width))
+    try:
+        with tempfile.TemporaryDirectory(prefix="omvtool-alpha-") as folder:
+            output = Path(folder) / "probe.mp4"
+            encoded = subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgba",
+                    "-video_size",
+                    f"{width}x{height}",
+                    "-framerate",
+                    "30",
+                    "-i",
+                    "pipe:0",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=in_range=full:out_range=limited:out_color_matrix=bt709,format=yuva420p",
+                    *args,
+                    str(output),
+                ],
+                input=row * height,
+                capture_output=True,
+                timeout=30,
+                env=external_env(),
+            )
+            if encoded.returncode:
+                lines = encoded.stderr.decode(errors="replace").splitlines()
+                return False, next(
+                    (line for line in lines if "alpha" in line.lower()),
+                    "libx265 trial encoding failed",
+                )
+            decoded = subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-i",
+                    str(output),
+                    "-vf",
+                    "alphaextract",
+                    "-frames:v",
+                    "1",
+                    "-pix_fmt",
+                    "gray",
+                    "-f",
+                    "rawvideo",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                timeout=30,
+                env=external_env(),
+            )
+            pixels = decoded.stdout
+            if decoded.returncode or len(pixels) != width * height:
+                return False, "Encoded alpha could not be decoded by this FFmpeg"
+            error = sum(
+                abs(value - (i % width)) for i, value in enumerate(pixels)
+            ) / len(pixels)
+            if error > 16 or min(pixels) >= 32 or max(pixels) <= 223:
+                return (
+                    False,
+                    "Alpha ramp was lost or severely distorted (try a lower --crf)",
+                )
+            return True, "HEVC alpha MP4 round-trip passed"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, type(exc).__name__ + " during alpha trial encoding"
 
 
 def probe_encoder(a, width=256, height=192):

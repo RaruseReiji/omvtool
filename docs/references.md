@@ -27,6 +27,7 @@
 - [SSSU 视频模块说明](https://github.com/Jirehlov/SiglusSceneScriptUtility/blob/main/manual.md#-v----video--work-with-omv-video-files)：提取/分析/回封装语义及音频限制。
 - [FFmpeg filters](https://ffmpeg.org/ffmpeg-filters.html)、[protocols / subfile](https://ffmpeg.org/ffmpeg-protocols.html#subfile)：按偏移读取、fps/tpad/scale 等。
 - [FFmpeg 编码器说明](https://ffmpeg.org/ffmpeg-codecs.html)、[硬件加速输入选项](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)：libx265、SVT-AV1、QSV 等和 hwaccel；具体可用参数以本地 `ffmpeg -h encoder=NAME` 为准。
+- [FFmpeg 8.0 Changelog](https://github.com/FFmpeg/FFmpeg/blob/n8.0/Changelog)、[libx265 实现](https://github.com/FFmpeg/FFmpeg/blob/n8.0/libavcodec/libx265.c)、[HEVC alpha 解码](https://www.ffmpeg.org/doxygen/8.0/libavcodec_2hevc_2hevcdec_8c_source.html)、[x265 alpha 构建要求](https://x265.readthedocs.io/en/4.1/cli.html#alpha-encode-options)：alpha 层编码、解码及依赖检查。
 - [Theora specification](https://www.theora.org/doc/Theora.pdf)：Theora 标识、画面尺寸与有理数帧率。
 
 当日 GitHub API 返回 omvdecoder 的 4 个公开 fork：BaoLyHoseki 与上游相同；

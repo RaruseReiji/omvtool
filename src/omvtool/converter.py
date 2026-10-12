@@ -14,27 +14,41 @@ import sys
 import tempfile
 
 import numpy as np
-from .header import inspect
+from .header import inspect, UnsupportedFormat
 from .runtime import executable, external_env
-from .encoding import select_encoder, video_args, pixel_filter, device_args
+from .encoding import select_encoder, video_args, pixel_filter, device_args, probe_alpha
 
 
-def layout(path):
+def layout(path, force_mode=None):
     m = inspect(path)
+    m["declared_mode"] = m["mode"]
+    m["forced_mode"] = force_mode
+    if force_mode is not None:
+        if force_mode not in (0, 1, 2):
+            raise ValueError("--force-mode must be 0, 1 or 2")
+        print(
+            f"WARNING: forcing mode {force_mode}; file declares {m['mode']}; dimensions and sampling remain validated.",
+            file=sys.stderr,
+        )
+        m["mode"] = force_mode
     w, vh, h = m["theora_width"], m["theora_height"], m["height"]
     mode = m["mode"]
+    if min(w, vh, h, m["width"]) <= 0:
+        raise UnsupportedFormat("Invalid frame dimensions")
     if mode not in (0, 1, 2):
-        raise ValueError(f"Unsupported OMV mode {mode}; refusing to guess")
+        raise UnsupportedFormat(
+            f"Unsupported OMV mode {mode}; refusing to guess. Use --force-mode only for a known compatible layout"
+        )
     if m["pixel_format"] != 3:
-        raise ValueError(
+        raise UnsupportedFormat(
             "Expected Theora 4:4:4; refusing to reinterpret subsampled planes"
         )
     if mode == 1:
         if w != m["width"] or vh != h + (h + 2) // 3:
-            raise ValueError("Unexpected packed-alpha dimensions")
+            raise UnsupportedFormat("Unexpected packed-alpha dimensions")
     elif mode == 0:
         if (w, vh) != (m["width"], h):
-            raise ValueError("Unexpected BGR dimensions")
+            raise UnsupportedFormat("Unexpected BGR dimensions")
     else:
         # Translated files sometimes store macroblock dimensions (1088),
         # while Theora pic_height is the actual display size (1080).
@@ -183,11 +197,23 @@ def run_checked(cmd):
 
 
 def convert(source, output, args):
-    m = layout(source)
+    m = layout(source, getattr(args, "force_mode", None))
     if args.format == "mp4":
         args.selected_encoder = select_encoder(
             args, m["output_width"], m["output_height"]
         )
+        if args.alpha == "preserve":
+            if not m["alpha"]:
+                raise ValueError(
+                    "--alpha preserve requires a packed-alpha (mode 1) source"
+                )
+            ok, reason = probe_alpha(args)
+            if not ok:
+                raise ValueError(
+                    "HEVC alpha encode/decode check failed: "
+                    + reason
+                    + "; use an alpha-enabled FFmpeg/x265 build or --format ffv1"
+                )
         # Validate the full profile before creating temporary files.
         video_args(args)
         device_args(args)

@@ -4,6 +4,7 @@ import io
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from omvtool.encoding import (
     pixel_filter,
     device_args,
     validate,
+    _probe_alpha,
 )
 from omvtool.runtime import executable
 
@@ -34,6 +36,54 @@ def profile(**kwargs):
 
 
 class EncoderTests(unittest.TestCase):
+    def test_alpha_options_reject_unsupported_backends(self):
+        for codec, encoder, fmt in (
+            ("h264", "software", "mp4"),
+            ("av1", "software", "mp4"),
+            ("hevc", "auto", "mp4"),
+            ("hevc", "nvenc", "mp4"),
+            ("hevc", "software", "ffv1"),
+        ):
+            with (
+                self.subTest(codec=codec, encoder=encoder, fmt=fmt),
+                self.assertRaises(ValueError),
+            ):
+                validate(
+                    profile(codec=codec, encoder=encoder, format=fmt, alpha="preserve")
+                )
+        a = profile(codec="hevc", selected_encoder="libx265", alpha="preserve")
+        validate(a)
+        self.assertEqual(pixel_filter(a), "format=yuva420p")
+        self.assertIn("+yuva420p", video_args(a))
+
+    def test_alpha_roundtrip_rejects_opaque_fallback(self):
+        for pixels, success in (
+            (bytes(range(256)) * 192, True),
+            (bytes([255]) * (256 * 192), False),
+            (b"", False),
+        ):
+            _probe_alpha.cache_clear()
+            with patch(
+                "omvtool.encoding.subprocess.run",
+                side_effect=[
+                    SimpleNamespace(returncode=0, stderr=b""),
+                    SimpleNamespace(returncode=0, stdout=pixels),
+                ],
+            ):
+                self.assertEqual(_probe_alpha("ffmpeg", ())[0], success)
+        _probe_alpha.cache_clear()
+        with patch(
+            "omvtool.encoding.subprocess.run",
+            return_value=SimpleNamespace(
+                returncode=1,
+                stderr=b"Loaded libx265 does not support alpha layer encoding.",
+            ),
+        ):
+            ok, reason = _probe_alpha("ffmpeg", ())
+            self.assertFalse(ok)
+            self.assertIn("alpha", reason)
+        _probe_alpha.cache_clear()
+
     def test_auto_requires_successful_device_probe(self):
         a = profile(codec="av1", encoder="auto")
         with (

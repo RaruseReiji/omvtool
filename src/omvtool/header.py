@@ -4,12 +4,22 @@ import struct
 from pathlib import Path
 
 
+class UnsupportedFormat(ValueError):
+    def __str__(self):
+        return super().__str__() + (
+            ". Possible new or damaged layout. No report was collected or uploaded. "
+            "Review collection scope with omvtool diagnose --help. To consent and create a local structural report, run: "
+            'omvtool diagnose "INPUT.omv" -o report.json --consent; '
+            "review the JSON and attach it manually to an issue."
+        )
+
+
 def inspect(path):
     path = Path(path).resolve()
     with open(path, "rb") as f:
         b = f.read(168)
         if len(b) != 168 or b[:8] != bytes.fromhex("a800000001010000"):
-            raise ValueError("Unsupported OMV header/version")
+            raise UnsupportedFormat("Unsupported OMV header/version")
         off = struct.unpack_from("<I", b)[0]
         pages, frames = struct.unpack_from("<II", b, 0x4C)
         ogg = off + pages * 28 + frames * 32
@@ -30,6 +40,7 @@ def inspect(path):
     return dict(
         path=str(path),
         size=path.stat().st_size,
+        version=struct.unpack_from("<I", b, 4)[0],
         offset=off,
         ogg_offset=ogg,
         mode=struct.unpack_from("<I", b, 0x28)[0],
@@ -44,8 +55,16 @@ def inspect(path):
         frames=frames,
         theora_width=be(14, 3),
         theora_height=be(17, 3),
+        theora_version=list(t[7:10]),
+        coded_width=be(10, 2) * 16,
+        coded_height=be(12, 2) * 16,
+        picture_x=be(20, 1),
+        picture_y=be(21, 1),
         fps_num=be(22, 4),
         fps_den=be(26, 4),
+        aspect_num=be(30, 3),
+        aspect_den=be(33, 3),
+        nominal_bitrate=be(37, 3),
         pixel_format=(be(40, 2) >> 3) & 3,
         colorspace=be(36, 1),
     )

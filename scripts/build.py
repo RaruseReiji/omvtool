@@ -121,7 +121,20 @@ def main():
         "VALIDATION.md",
     ):
         shutil.copy2(ROOT / file, stage / file)
-    shutil.copytree(ROOT / "docs", stage / "docs")
+    (stage / "docs").mkdir()
+    for file in ("usage.md", "format.md", "references.md"):
+        shutil.copy2(ROOT / "docs" / file, stage / "docs" / file)
+    # Repository development links are not relevant to a binary distribution.
+    readme = stage / "README.md"
+    readme.write_text(
+        "\n".join(
+            line
+            for line in readme.read_text(encoding="utf8").splitlines()
+            if "docs/development.md" not in line
+        )
+        + "\n",
+        encoding="utf8",
+    )
     shutil.copytree(ROOT / "examples", stage / "examples")
     notices = licenses(stage / "licenses")
     versions = {

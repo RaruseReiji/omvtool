@@ -27,7 +27,7 @@ $env:OMVTOOL_FFPROBE = 'C:\Tools\ffmpeg\bin\ffprobe.exe'
 omvtool doctor
 ```
 
-`doctor` 检查两个程序、基础编码器和滤镜，列出软件/硬件编码器及输入硬件加速方法；基础依赖缺失返回 1。HEVC/AV1 与硬件编码器为可选功能。`doctor --test-encoders` 会逐个实际编码一帧，标记 PASS 或 UNAVAILABLE；可选后端不可用不会使基础诊断失败。单独 `extract` 不需要 FFmpeg。
+`doctor` 检查两个程序、基础编码器和滤镜，列出软件/硬件编码器及输入硬件加速方法；基础依赖缺失返回 1。HEVC/AV1 与硬件编码器为可选功能。`doctor --test-encoders` 会逐个实际编码一帧，并单独检查 libx265 alpha 往返，标记 PASS 或 UNAVAILABLE；可选后端不可用不会使基础诊断失败。单独 `extract` 不需要 FFmpeg。
 不要求 FFmpeg 带 libtheora **编码器**，该编码器仅供开发集成测试生成样本。
 
 ## 一般转换
@@ -57,7 +57,8 @@ INPUT 可以是一个 `.omv` 文件或目录。单文件默认输出 MP4，OUTPU
 | `--frames COUNT` | 全部剩余帧 | 输出帧数上限，须正整数 |
 | `--yuv-range full/limited` | full | mode 2 的输入范围；mode 0/1 不使用 |
 | `--matrix 601/709` | 601 | mode 2 的输入颜色矩阵；mode 0/1 不使用 |
-| `--alpha black/discard` | black | MP4 的透明处理；FFV1 始终保留 alpha |
+| `--alpha black/discard/preserve` | black | MP4 的透明处理；FFV1 始终保留 alpha |
+| `--force-mode 0/1/2` | 不覆盖 | 强制已知布局，保留版本/抽样/尺寸校验 |
 | `--audio auto/copy/none` | auto | 内嵌音频处理方式 |
 
 ```console
@@ -72,7 +73,7 @@ omvtool convert movie.omv -o alternate.mp4 --yuv-range limited --matrix 709
 颜色抽样和颜色转换影响；需要逐像素保存请用 FFV1。mode 2 的默认 full/601
 来自所检查转换源码及样本，无法替代与具体游戏渲染结果对照。
 
-输出 MP4 使用 BT.709 limited-range YUV420p，写入颜色标记和 faststart。
+输出 MP4 使用 BT.709 limited-range YUV420p（保留 alpha 时为 YUVA420p），写入颜色标记和 faststart。
 奇数宽高补到偶数以兼容编码器/播放器，最多多一列或一行。FFV1 保持原可见尺寸。
 帧率使用 Theora 分子/分母，恢复重复帧并按 OMV 帧表控制总长度。
 `--start` 向下取到最近视频帧边界，音频采用相同的实际起点，帧数上限不会超过剩余片长。
@@ -121,6 +122,7 @@ OGV 会把这些行当图像。工具会先重建可见区域和 alpha。
 
 - MP4 默认 `--alpha black`：按透明度合成黑底。
 - MP4 `--alpha discard`：丢弃透明度，显示其底层 RGB，透明区域可能出现隐藏颜色。
+- MP4 `--alpha preserve`：仅支持 `--codec hevc --encoder software` / `libx265`，须为 mode 1 输入；详见下文。
 - FFV1 MKV：mode 0/1 保存 BGRA，其中 mode 1 包括 alpha 和隐藏 RGB；mode 2 保存 YUV444。
 - RGBA stdout：始终带 alpha，非透明视频的 alpha 为 255。
 
@@ -207,6 +209,66 @@ python examples/pipe_to_ffmpeg.py movie.omv custom.mp4
 该示例需要源码安装环境。可执行版直接使用 `convert` 即可，不依赖 Python。
 不要将 `pipe` stdout 混入日志或直接写向交互终端；下游须完整读取或主动终止上游。
 
+## HEVC alpha 的条件
+
+[FFmpeg 8.0 变更记录](https://github.com/FFmpeg/FFmpeg/blob/n8.0/Changelog)
+明确增加 libx265 alpha layer encoding。
+[编码器源码](https://github.com/FFmpeg/FFmpeg/blob/n8.0/libavcodec/libx265.c)
+还要求相应 x265 多层/alpha 能力；[x265 4.1 文档](https://x265.readthedocs.io/en/4.1/cli.html#alpha-encode-options) 指出须在构建时开启 `ENABLE_ALPHA`。版本号新、列出 `yuva420p` 都不能保证能编码。
+像素格式选择触发 alpha，无需再手动传 `alpha=1`。
+
+```console
+omvtool convert effect.omv -o effect_alpha.mp4 --codec hevc --alpha preserve --crf 18
+```
+
+程序先在临时目录用当前编码参数编码一帧透明渐变为 MP4，再用同一 FFmpeg 提取
+alpha，检查长度、梯度和误差。试验通过才转换源文件；失败明确报错，不回退到不透明输出。
+临时试验不读取游戏画面，不联网，结束后清理。`+yuva420p` 强制像素格式，禁止
+FFmpeg 在不支持时悄悄改成无 alpha 格式。非常低的质量也可能因透明度失真而未通过检查。
+
+HEVC alpha 同样有损，RGB 也经过 4:2:0 抽样；逐像素保存 alpha/隐藏 RGB 请用 FFV1。
+支持解码 HEVC 不代表能显示其辅助 alpha 层；播放器可能只显示颜色层，须在目标
+编辑器/播放环境验证。macOS VideoToolbox 有独立的
+[HEVCWithAlpha / alpha_quality 实现](https://github.com/FFmpeg/FFmpeg/blob/n8.0/libavcodec/videotoolboxenc.c)，
+当前工具的 preserve 路径限于 libx265，未开放未经本机验证的 VideoToolbox alpha。
+NVENC/QSV/AMF/VAAPI、H.264/AV1 和 `--encoder auto` 不接受 preserve，避免自动选择
+不支持 alpha 的编码器。已有普通硬件编码仍可使用 black/discard。
+
+## 未知布局诊断与手动覆盖
+
+未来新模式或损坏文件均可能触发报错。工具不自动采集报告、不发送网络请求。
+先查看诊断帮助；不带 `--consent` 的命令会解释收集内容并退出，不写文件：
+
+```console
+omvtool diagnose --help
+omvtool diagnose movie.omv -o report.json
+# 阅读说明并同意后，主动重跑：
+omvtool diagnose movie.omv -o report.json --consent
+```
+
+报告只含工具版本、文件大小、有限的数字头字段及可解析的 Theora 结构。
+读取范围为前 168 字节，以及已知外壳能定位时最多 65536 字节的 Ogg 开头；
+**不写入路径、文件名、机器信息、原始头字节、注释、文件哈希、视频或音频**。
+未知版本的字段只标为 candidate，不能据此认定格式。
+源文件只读，已有报告拒绝覆盖。报告不会自动上传。
+
+请自行打开 JSON 检查内容，愿意提交时将它作为附件上传到项目 issue，并手动描述
+游戏名/版本、错误现象和执行命令（可删去私人路径）。初步诊断不需要整部视频；
+报告未必足以推断全新布局，后续样本共享由用户自行决定。
+
+已确认实际布局与模式标签不符时，可强制解释：
+
+```console
+omvtool inspect movie.omv --force-mode 2 --json
+omvtool convert movie.omv -o trial.mp4 --force-mode 2 --frames 60
+```
+
+convert、pipe、inspect、extract 支持此选项；目录调用对所有文件应用同一覆盖，
+因此建议先检查单文件。inspect JSON 同时显示 declared_mode、forced_mode、有效 mode，
+stderr 显示警告。extract 仍复制原始 Ogg 数据，不改头、不改平面。
+覆盖不会绕过版本、抽样或布局尺寸检查，也不保证颜色解释正确。
+输入色彩依据与字段见[格式说明](format.md#源文件实际声明了什么)。
+
 ## 错误与退出码
 
 | 退出码 | 含义 |
@@ -217,6 +279,5 @@ python examples/pipe_to_ffmpeg.py movie.omv custom.mp4
 | 130 | 用户 Ctrl+C 中断 |
 
 `idcin`、`168x257` 通常是 FFmpeg 误识别 OMV 外壳。先 inspect，再 convert。
-未知模式、非 4:4:4 或 alpha 尺寸不匹配会拒绝转换；请保留完整错误和
-inspect 信息用于排查。发布问题时不必上传整部游戏资源。
+未知模式、非 4:4:4 或 alpha 尺寸不匹配会拒绝转换，并提示诊断命令；诊断与覆盖方法见上文。
 字幕、章节、附加图片、交错多视频流和动态尺寸变化尚未作为支持目标。

@@ -2,7 +2,7 @@
 
 将 **SiglusEngine `.omv`** 流式转换为 H.264、HEVC、AV1 MP4 或无损 MKV，正确处理 BGR、BGR+alpha 和 YUV 三种存储模式，无需中间 PNG。
 
-支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.4.0**。
+支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.5.0**。
 
 ## 快速开始
 
@@ -49,7 +49,6 @@ PowerShell 在当前目录运行发布版时，使用 `./omvtool.exe`。源码�
 - [格式与验证结论](docs/format.md)：OMV 布局、色偏/割裂成因、验证范围。
 - [参考来源及工具对比](docs/references.md)：上游源码、相关提取器、差异与限制。
 - [开发和测试](docs/development.md)：安装、合成测试、项目结构。
-- [构建与发布](docs/release.md)：六平台 CI、发布草稿、校验和及本地构建。
 - [English quick start](README.en.md)。
 
 ## 支持范围
@@ -58,7 +57,7 @@ PowerShell 在当前目录运行发布版时，使用 `./omvtool.exe`。源码�
 
 检查了九个游戏的 532 个文件：529 个非空文件首两帧成功重建；代表性完整视频及三类像素往返测试通过。全部样本没有内嵌音轨；音频功能另用合成的双 Vorbis 音轨样本验证。详见[验证范围](docs/format.md#验证范围)。发布目录和测试不包含游戏素材。
 
-MP4 为有损输出；FFV1 保存的是 Theora **解码后**的像素，不能恢复源编码已经损失的细节。源压缩码流需要用 `extract` 保存。普通 MP4 不保存透明通道，默认合成到黑底。
+MP4 为有损输出；FFV1 保存的是 Theora **解码后**的像素，不能恢复源编码已经损失的细节。源压缩码流需要用 `extract` 保存。MP4 默认合成到黑底；HEVC 可通过 `--alpha preserve` 保存透明度，须通过当前 FFmpeg/x265 的实际能力检查。
 
 硬件编码支持 NVENC、QSV、AMF、VAAPI、VideoToolbox，具体取决于 FFmpeg 构建、显卡和驱动。Theora 输入通常由 CPU 解码，颜色/alpha 重建也在 CPU 完成。用 `omvtool doctor --test-encoders` 可实际试编码；编译进 FFmpeg 不等于本机可用。
 

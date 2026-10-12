@@ -40,6 +40,7 @@ src/omvtool/
   header.py       OMV/Theora 结构读取
   converter.py    平面重建、FFmpeg 流式转换、内嵌音频
   encoding.py     软件/硬件编码参数、实际编码探测
+  diagnostics.py  显式同意后的本地结构报告，无网络上传
   runtime.py      外部程序定位、冻结运行时环境处理
 tests/            可公开的合成/单元测试
 examples/         二进制管道示例
@@ -77,3 +78,5 @@ $env:OMVTOOL_HARDWARE_TEST = '1'
 $env:OMVTOOL_HARDWARE_ENCODERS = 'h264_nvenc,hevc_nvenc,av1_nvenc'
 python -m unittest discover -s tests -v
 ```
+
+HEVC alpha 集成测试按当前 FFmpeg 的实际能力分别验证成功往返或安全拒绝；本机构建若缺少 x265 alpha，不能将失败分支通过说成实际 alpha 编码已通过。单元测试另检查透明度渐变与不透明回退。二进制包只附 usage/format/references；开发说明保留在源码中，docs/release.md 为被忽略的本地发布备忘。

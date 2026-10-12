@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import struct
 import tempfile
 import unittest
@@ -87,6 +88,89 @@ class LayoutTests(unittest.TestCase):
         p.write_bytes(p.read_bytes()[:-20])
         with self.assertRaises(ValueError):
             inspect(p)
+
+    def test_forced_mode_preserves_validation_and_declared_value(self):
+        p = header_fixture(self.root / "a.omv", mode=99)
+        with contextlib.redirect_stderr(io.StringIO()):
+            m = layout(p, 2)
+            self.assertEqual(
+                (m["declared_mode"], m["forced_mode"], m["mode"]), (99, 2, 2)
+            )
+            with self.assertRaises(ValueError):
+                layout(p, 1)
+            with self.assertRaises(ValueError):
+                layout(header_fixture(p, pixel_format=0), 2)
+            data = bytearray(p.read_bytes())
+            struct.pack_into("<I", data, 4, 258)
+            p.write_bytes(data)
+            with self.assertRaises(ValueError):
+                layout(p, 2)
+
+    def test_unknown_mode_hint_and_opt_in_private_report(self):
+        source = header_fixture(self.root / "private-game-name.omv", mode=99)
+        output = self.root / "report.json"
+        with contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(main(["inspect", str(source)]), 1)
+        self.assertIn("diagnose", error.getvalue())
+        self.assertIn("--consent", error.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["diagnose", str(source), "-o", str(output)]), 1)
+        self.assertFalse(output.exists())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(["diagnose", str(source), "-o", str(output), "--consent"]), 0
+            )
+        text = output.read_text(encoding="utf8")
+        data = json.loads(text)
+        self.assertEqual(data["status"], "unknown_mode")
+        self.assertEqual(data["metadata"]["mode"], 99)
+        for private in (str(self.root), source.name, "prefix_hex", "serial", "path"):
+            self.assertNotIn(private, text)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                main(["diagnose", str(source), "-o", str(output), "--consent"]), 1
+            )
+        self.assertEqual(output.read_text(encoding="utf8"), text)
+
+    def test_unknown_version_report_and_theora_fields(self):
+        p = header_fixture(self.root / "a.omv")
+        data = bytearray(p.read_bytes())
+        start = data.find(b"\x80theora")
+        data[start + 7 : start + 10] = bytes((3, 2, 1))
+        for offset, size, value in (
+            (10, 2, 1),
+            (12, 2, 1),
+            (20, 1, 2),
+            (21, 1, 3),
+            (30, 3, 4),
+            (33, 3, 3),
+            (36, 1, 2),
+        ):
+            data[start + offset : start + offset + size] = value.to_bytes(size, "big")
+        p.write_bytes(data)
+        m = inspect(p)
+        self.assertEqual((m["coded_width"], m["coded_height"]), (16, 16))
+        self.assertEqual(m["theora_version"], [3, 2, 1])
+        self.assertEqual(
+            (
+                m["picture_x"],
+                m["picture_y"],
+                m["aspect_num"],
+                m["aspect_den"],
+                m["colorspace"],
+            ),
+            (2, 3, 4, 3, 2),
+        )
+        struct.pack_into("<I", data, 4, 258)
+        p.write_bytes(data)
+        output = self.root / "unknown.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(["diagnose", str(p), "-o", str(output), "--consent"]), 0
+            )
+        report = json.loads(output.read_text())
+        self.assertEqual(report["candidate_header_fields"]["version"], 258)
+        self.assertNotIn("metadata", report)
 
     def test_yuv_black_white_and_color(self):
         m = {"mode": 2, "output_height": 1, "output_width": 3}

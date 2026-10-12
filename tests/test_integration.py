@@ -13,7 +13,8 @@ import numpy as np
 
 from omvtool.converter import input_args, layout, read_frame, unpack
 from omvtool.runtime import executable, external_env
-from omvtool.encoding import encoder_list, SOFTWARE
+from omvtool.encoding import encoder_list, SOFTWARE, probe_alpha
+from argparse import Namespace
 
 
 def command(*args, check=True):
@@ -123,6 +124,90 @@ class IntegrationTests(unittest.TestCase):
                 str(path),
             ).stdout
         )
+
+    def test_hevc_alpha_capability_and_safe_failure(self):
+        a = Namespace(
+            codec="hevc",
+            selected_encoder="libx265",
+            alpha="preserve",
+            crf=18,
+            preset="ultrafast",
+            quality=None,
+            bitrate=None,
+            encode_device=None,
+        )
+        ok, reason = probe_alpha(a)
+        out = self.root / "preserved-alpha.mp4"
+        result = cli(
+            "convert",
+            self.sources[1],
+            "-o",
+            out,
+            "--codec",
+            "hevc",
+            "--alpha",
+            "preserve",
+            "--crf",
+            "18",
+            "--preset",
+            "ultrafast",
+            "--frames",
+            "2",
+            check=False,
+        )
+        if not ok:
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"HEVC alpha encode/decode check failed", result.stderr)
+            self.assertFalse(out.exists())
+            self.assertFalse(list(self.root.glob("preserved-alpha.partial-*")))
+            print("HEVC alpha unavailable in test FFmpeg: " + reason)
+            return
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        rgba = np.frombuffer(
+            cli("pipe", self.sources[1], "--frames", "2").stdout, np.uint8
+        ).reshape(2, 192, 256, 4)
+        alpha = command(
+            executable("ffmpeg"),
+            "-v",
+            "error",
+            "-i",
+            str(out),
+            "-vf",
+            "alphaextract",
+            "-frames:v",
+            "2",
+            "-pix_fmt",
+            "gray",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ).stdout
+        decoded = np.frombuffer(alpha, np.uint8).reshape(2, 192, 256)
+        self.assertLess(np.abs(decoded.astype(float) - rgba[:, :, :, 3]).mean(), 16)
+        self.assertEqual(
+            len([s for s in self.probe(out)["streams"] if s["codec_type"] == "audio"]),
+            2,
+        )
+
+    def test_forced_unknown_mode_pipe_and_diagnostic(self):
+        source = self.root / "unknown-mode.omv"
+        data = bytearray(self.sources[1].read_bytes())
+        struct.pack_into("<I", data, 0x28, 99)
+        source.write_bytes(data)
+        self.assertNotEqual(cli("inspect", source, check=False).returncode, 0)
+        result = cli("pipe", source, "--force-mode", "1", "--frames", "2")
+        self.assertEqual(
+            result.stdout, cli("pipe", self.sources[1], "--frames", "2").stdout
+        )
+        self.assertIn(b"forcing mode", result.stderr)
+        report = self.root / "diagnostic.json"
+        self.assertNotEqual(
+            cli("diagnose", source, "-o", report, check=False).returncode, 0
+        )
+        self.assertFalse(report.exists())
+        cli("diagnose", source, "-o", report, "--consent")
+        self.assertEqual(json.loads(report.read_text())["status"], "unknown_mode")
+        source.unlink()
 
     def test_hevc_av1_and_input_acceleration(self):
         available = encoder_list(executable("ffmpeg"))

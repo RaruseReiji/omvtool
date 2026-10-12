@@ -2,6 +2,7 @@
 /build/
 /dist/
 /release/
+/docs/release.md
 *.spec
 *.egg-info/
 __pycache__/
