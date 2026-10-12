@@ -6,9 +6,9 @@
 
 ## 快速开始
 
-需要 FFmpeg 和 ffprobe。**直接把 `ffmpeg.exe`、`ffprobe.exe` 放到 `omvtool.exe` 旁边即可，无需设置 PATH。** macOS/Linux 使用不带 `.exe` 的程序，并保留执行权限。也支持当前工作目录、PATH 和环境变量指定路径。FFmpeg 的编码器/驱动支持可用 `doctor` 检查。
+需要 FFmpeg 和 ffprobe。请于 [ffmpeg 官方页面](https://ffmpeg.org/download.html) 处下载 ffmpeg 可执行文件，例如 Windows 可从源于 [gyan.dev 的 build 构建](https://www.gyan.dev/ffmpeg/builds/) 处下载压缩包 [ffmpeg-git-full.7z](https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z) ，可**直接把压缩包中 `bin` 文件夹中的 `ffmpeg.exe`、`ffprobe.exe` 放到 `omvtool.exe` 旁边即可**，也可将其设置到系统 PATH 中。 macOS/Linux 从 [ffmpeg 官方页面](https://ffmpeg.org/download.html) 的相应链接处下载不带 `.exe` 的程序，并保留执行权限。支持当前工作目录、PATH 和环境变量指定路径。FFmpeg 的编码器/驱动支持可用 `doctor` 检查。
 
-**可执行文件**：下载与系统/架构相符的发布包，解压后执行 `omvtool`（Windows 为 `omvtool.exe`）。可执行文件包含 Python 和 NumPy，不包含 FFmpeg。未签名的构建可能触发系统提示；macOS 也可能要求在系统设置中允许运行。
+**本项目可执行文件**：下载与系统/架构相符的发布包，解压后执行 `omvtool`（Windows 为 `omvtool.exe`）。可执行文件包含 Python 和 NumPy，不包含 FFmpeg。未签名的构建可能触发系统提示；macOS 也可能要求在系统设置中允许运行。
 
 **源码安装**：Python 3.10+，在项目目录运行：
 
@@ -47,7 +47,7 @@ omvtool inspect "movie.omv" --json
 omvtool extract "movie.omv" -o "movie.ogv"
 ```
 
-PowerShell 在当前目录运行发布版时，使用 `./omvtool.exe`。源码安装后也可用 `python -m omvtool` 代替 `omvtool`，参数相同。输入、输出路径可包含中文或空格；建议加引号。
+PowerShell 在当前目录运行发布版时，使用 `./omvtool.exe`。源码安装后也可用 `python -m omvtool` 代替 `omvtool`，参数相同。输入、输出路径可包含中文或空格，建议加引号。
 
 ## 文档
 

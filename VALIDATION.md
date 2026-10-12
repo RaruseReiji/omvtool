@@ -32,5 +32,6 @@ Linux/macOS/ARM64 工作流尚待 GitHub Actions 执行。游戏样本验证范�
 - 新增三种模式 × MP4/FFV1 × 24/60/24000÷1001fps 调帧率检查，验证有理数帧率、输出帧数、视频时长和双音轨；另验证 start 与输出 frames 组合及 --no-progress。
 - FFV1 的 BGR/alpha 调帧率输出逐帧匹配源解码像素，确认重复/丢帧不会改变保存帧的颜色/alpha。
 - 进度记录解析、错误保留、禁用和零计数边界有回归；既有 RGBA 管道逐字节测试继续验证 stdout 无日志污染。
-- workflow 通过 actionlint；v* 标签自动公开 Release，含连字符的匹配版本标签标为 prerelease。尚未配置远程仓库，未实际运行 GitHub 云端构建/发布。
+- workflow 通过 actionlint；v* 标签自动公开 Release，含连字符的匹配版本标签标为 prerelease。
 - C 盘 Stella of the end 的 ED00：HEVC 软件编码输出 1920×1080、60fps、60 帧通过；实际日志出现 0%、16.7%、100% 及耗时/ETA，未访问 L 盘。
+
