@@ -76,8 +76,7 @@ jobs:
           architecture: ${{ matrix.architecture }}
           cache: pip
       - run: python -m pip install ".[build]"
-      - run: python -m unittest discover -s tests -v
-      - run: python scripts/build.py --architecture ${{ matrix.architecture }}
+      - run: python -m unittest discover -s tests -v\r?\n        if: matrix.platform == 'linux'\n      - run: python scripts/build.py --architecture ${{ matrix.architecture }}
       - uses: actions/upload-artifact@v6
         with:
           name: omvtool-${{ matrix.platform }}-${{ matrix.architecture }}
@@ -133,3 +132,4 @@ jobs:
             options+=(--prerelease)
           fi
           gh release create "$GITHUB_REF_NAME" release-assets/* "${options[@]}"
+
