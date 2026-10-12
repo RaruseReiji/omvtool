@@ -61,3 +61,7 @@ Thanks to omvdecoder, SiglusExtract and SiglusSceneScriptUtility for format and
 implementation references; see [references and acknowledgements](docs/references.md).
 
 Unknown layouts stop with a diagnostic hint. `omvtool diagnose INPUT -o report.json --consent` creates a local JSON of structural numeric fields only; review it before manually attaching it to an issue. No upload is performed. `--force-mode 0/1/2` overrides the declared mode while keeping version, dimensions and sampling checks. See the full manual for details.
+
+Use `convert --fps 60` or `--fps 30000/1001` to duplicate/drop frames without changing playback speed. `--frames` counts output frames. Stage/frame/elapsed/ETA progress goes to stderr; disable it with `--no-progress`. Tagged v* builds publish a GitHub Release after all builds and checks pass. Tests stay in the source repository for CI, and are excluded from binary packages.
+
+Use `convert --overwrite` to replace an existing output only after the complete temporary file has been written; the input is never overwritten. Without it, single-file conversion fails and directory conversion skips existing outputs.

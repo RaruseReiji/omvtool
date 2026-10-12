@@ -15,6 +15,9 @@ from omvtool.converter import input_args, layout, read_frame, unpack
 from omvtool.runtime import executable, external_env
 from omvtool.encoding import encoder_list, SOFTWARE, probe_alpha
 from argparse import Namespace
+from fractions import Fraction
+import math
+import hashlib
 
 
 def command(*args, check=True):
@@ -188,6 +191,86 @@ class IntegrationTests(unittest.TestCase):
             len([s for s in self.probe(out)["streams"] if s["codec_type"] == "audio"]),
             2,
         )
+
+    def test_output_frame_rate_and_audio_timing(self):
+        for mode, source in enumerate(self.sources):
+            rgba = cli("pipe", source).stdout
+            frame_size = 256 * 192 * 4
+            source_frames = {
+                hashlib.sha256(rgba[i : i + frame_size]).digest()
+                for i in range(0, len(rgba), frame_size)
+            }
+            for fmt in ("mp4", "ffv1"):
+                for rate in ("24", "60", "24000/1001"):
+                    with self.subTest(mode=mode, fmt=fmt, rate=rate):
+                        out = (
+                            self.root
+                            / f"fps-{mode}-{fmt}-{rate.replace('/', '_')}.{'mp4' if fmt == 'mp4' else 'mkv'}"
+                        )
+                        result = cli(
+                            "convert", source, "-o", out, "--format", fmt, "--fps", rate
+                        )
+                        streams = self.probe(out)["streams"]
+                        v = next(s for s in streams if s["codec_type"] == "video")
+                        fps = Fraction(rate)
+                        expected = math.ceil(12 * fps / Fraction(30000, 1001))
+                        self.assertEqual(Fraction(v["avg_frame_rate"]), fps)
+                        self.assertEqual(int(v["nb_read_frames"]), expected)
+                        self.assertEqual(
+                            len([s for s in streams if s["codec_type"] == "audio"]), 2
+                        )
+                        self.assertIn(b"PROGRESS video", result.stderr)
+                        self.assertIn(b"audio mux", result.stderr)
+                        self.assertIn(b"ETA=", result.stderr)
+                        self.assertEqual(result.stdout, b"")
+                        if fmt == "ffv1" and mode != 2:
+                            raw = command(
+                                executable("ffmpeg"),
+                                "-v",
+                                "error",
+                                "-i",
+                                str(out),
+                                "-pix_fmt",
+                                "rgba",
+                                "-f",
+                                "rawvideo",
+                                "pipe:1",
+                            ).stdout
+                            for i in range(0, len(raw), frame_size):
+                                self.assertIn(
+                                    hashlib.sha256(raw[i : i + frame_size]).digest(),
+                                    source_frames,
+                                )
+                        if fmt == "mp4":
+                            self.assertAlmostEqual(
+                                float(v["duration"]), expected / float(fps), delta=0.002
+                            )
+                            for a in streams:
+                                if a["codec_type"] == "audio":
+                                    self.assertAlmostEqual(
+                                        float(a["duration"]),
+                                        expected / float(fps),
+                                        delta=0.06,
+                                    )
+        # Start remains aligned to source frames; --frames counts output frames.
+        out = self.root / "fps-trim.mp4"
+        result = cli(
+            "convert",
+            self.sources[1],
+            "-o",
+            out,
+            "--fps",
+            "24",
+            "--start",
+            ".1",
+            "--frames",
+            "5",
+            "--no-progress",
+        )
+        v = next(s for s in self.probe(out)["streams"] if s["codec_type"] == "video")
+        self.assertEqual(int(v["nb_read_frames"]), 5)
+        self.assertAlmostEqual(float(v["duration"]), 5 / 24, delta=0.002)
+        self.assertNotIn(b"PROGRESS", result.stderr)
 
     def test_forced_unknown_mode_pipe_and_diagnostic(self):
         source = self.root / "unknown-mode.omv"
@@ -412,6 +495,19 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(out.read_bytes(), original)
         self.assertFalse(list(self.root.glob("*.partial-*")))
+        result = cli(
+            "convert",
+            self.sources[0],
+            "-o",
+            out,
+            "--frames",
+            "2",
+            "--audio",
+            "none",
+            "--overwrite",
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(int(self.probe(out)["streams"][0]["nb_read_frames"]), 2)
 
     def test_audio_trim_and_packet_copy(self):
         out = self.root / "trim-audio.mp4"

@@ -5,6 +5,7 @@ import json
 import math
 import subprocess
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 from . import __version__
@@ -23,6 +24,9 @@ from argparse import Namespace
 
 
 def options(parser):
+    parser.add_argument(
+        "--no-progress", action="store_true", help="Disable periodic progress on stderr"
+    )
     parser.add_argument(
         "--force-mode",
         type=int,
@@ -64,6 +68,11 @@ def parser():
     )
     c.add_argument("input", type=Path)
     c.add_argument("-o", "--output", type=Path, required=True)
+    c.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing output file; the input file is never overwritten",
+    )
     c.add_argument("--format", choices=["mp4", "ffv1"], default="mp4")
     c.add_argument(
         "--codec",
@@ -95,6 +104,12 @@ def parser():
         help="MP4 alpha handling; preserve requires HEVC/libx265 with working alpha support",
     )
     c.add_argument("--audio", choices=["auto", "copy", "none"], default="auto")
+    c.add_argument(
+        "--fps",
+        type=frame_rate,
+        metavar="RATE",
+        help="Output frame rate, e.g. 24, 29.97 or 30000/1001; duplicates/drops frames without changing playback speed",
+    )
     options(c)
     i = sub.add_parser(
         "inspect", help="Show layout, frame rate and embedded audio streams"
@@ -112,6 +127,7 @@ def parser():
     e.add_argument("input", type=Path)
     e.add_argument("-o", "--output", type=Path, required=True)
     e.add_argument("--force-mode", type=int, choices=[0, 1, 2])
+    e.add_argument("--no-progress", action="store_true")
     r = sub.add_parser(
         "pipe", help="Write headerless RGBA video to binary stdout (one file)"
     )
@@ -137,6 +153,18 @@ def parser():
         help="Consent to collecting file size and numeric header fields only; excludes paths, names and media bytes",
     )
     return p
+
+
+def frame_rate(value):
+    try:
+        rate = Fraction(value)
+        if not 0 < rate <= 1000:
+            raise ValueError()
+        return rate
+    except (ValueError, ZeroDivisionError):
+        raise argparse.ArgumentTypeError(
+            "--fps requires a positive rate <= 1000, e.g. 60 or 30000/1001"
+        )
 
 
 def doctor(test_encoders=False):
@@ -318,6 +346,9 @@ def dispatch(a, p):
         yuv_range="full",
         matrix="601",
         force_mode=None,
+        fps=None,
+        no_progress=False,
+        overwrite=False,
         output=None,
     )
     for key, value in defaults.items():
@@ -359,12 +390,14 @@ def dispatch(a, p):
     ):
         p.error("extract requires an .ogv or .ogg output filename")
     failed = 0
-    for src in files:
+    for index, src in enumerate(files, 1):
+        if directory:
+            print(f"BATCH {index}/{len(files)}: {src}", file=sys.stderr)
         dst = a.output
         if directory:
             suffix = {"mp4": ".mp4", "ffv1": ".mkv", "ogv": ".ogv"}[a.format]
             dst = a.output / src.relative_to(a.input).with_suffix(suffix)
-            if dst.exists():
+            if dst.exists() and not a.overwrite:
                 print(f"SKIP existing: {dst}", file=sys.stderr)
                 continue
         try:

@@ -2,7 +2,7 @@
 
 将 **SiglusEngine `.omv`** 流式转换为 H.264、HEVC、AV1 MP4 或无损 MKV，正确处理 BGR、BGR+alpha 和 YUV 三种存储模式，无需中间 PNG。
 
-支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.5.0**。
+支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.6.0**。
 
 ## 快速开始
 
@@ -27,6 +27,12 @@ omvtool convert "movie.omv" -o "av1.mp4" --codec av1
 
 # NVIDIA 硬件编码；也可用 --encoder auto 自动探测
 omvtool convert "movie.omv" -o "av1_gpu.mp4" --codec av1 --encoder nvenc
+
+# 指定输出帧率，重复/丢弃帧，保持播放速度；默认显示进度
+omvtool convert "movie.omv" -o "movie_60.mp4" --fps 60
+
+# 已有目标时明确允许替换（输入文件不会被覆盖）
+omvtool convert "movie.omv" -o "movie.mp4" --overwrite
 
 # 无损保存解码后像素，透明效果保留 alpha
 omvtool convert "effect.omv" -o "effect.mkv" --format ffv1

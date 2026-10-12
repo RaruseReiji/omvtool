@@ -8,7 +8,6 @@ import math
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +16,7 @@ import numpy as np
 from .header import inspect, UnsupportedFormat
 from .runtime import executable, external_env
 from .encoding import select_encoder, video_args, pixel_filter, device_args, probe_alpha
+from .progress import Progress
 
 
 def layout(path, force_mode=None):
@@ -139,11 +139,13 @@ def probe_media(m):
     return json.loads(p.stdout)
 
 
-def mux_audio(video, m, output_format, policy, start, duration, streams):
+def mux_audio(video, m, output_format, policy, start, duration, streams, progress=None):
     """Keep audio timing relative to the requested video interval, never synthesize BGM."""
     audio = [s for s in streams if s["codec_type"] == "audio"]
     if not audio or policy == "none":
         return
+    if progress:
+        progress.phase("audio mux / finalizing", float(duration), "seconds")
     fd, name = tempfile.mkstemp(
         prefix=video.stem + ".audio-", suffix=video.suffix, dir=video.parent
     )
@@ -184,7 +186,7 @@ def mux_audio(video, m, output_format, policy, start, duration, streams):
     if output_format == "mp4":
         cmd += ["-movflags", "+faststart"]
     try:
-        run_checked(cmd + [str(muxed)])
+        run_checked(cmd + [str(muxed)], progress)
         # Both files belong to this conversion; final destination is still untouched.
         os.replace(muxed, video)
     finally:
@@ -192,13 +194,29 @@ def mux_audio(video, m, output_format, policy, start, duration, streams):
             muxed.unlink()
 
 
-def run_checked(cmd):
-    subprocess.run(cmd, check=True, env=external_env())
+def run_checked(cmd, progress=None):
+    if progress is None:
+        subprocess.run(cmd, check=True, env=external_env())
+        return
+    child = progress.spawn(cmd)
+    try:
+        if progress.wait(child):
+            raise subprocess.CalledProcessError(child.returncode, cmd)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            progress.wait(child)
 
 
 def convert(source, output, args):
+    with Progress(not getattr(args, "no_progress", False)) as progress:
+        return _convert(source, output, args, progress)
+
+
+def _convert(source, output, args, progress):
     m = layout(source, getattr(args, "force_mode", None))
     if args.format == "mp4":
+        progress.phase("selecting / testing encoder")
         args.selected_encoder = select_encoder(
             args, m["output_width"], m["output_height"]
         )
@@ -218,6 +236,7 @@ def convert(source, output, args):
         video_args(args)
         device_args(args)
         print(f"ENCODER: {args.selected_encoder}", file=sys.stderr)
+    progress.phase("probing streams")
     media = probe_media(m) if args.format in ("mp4", "ffv1", "inspect") else None
     if media is not None:
         m["audio_streams"] = [
@@ -243,18 +262,24 @@ def convert(source, output, args):
     if not m["frames"] and args.format != "ogv":
         raise ValueError("Header-only OMV placeholder: zero video frames")
     fps = Fraction(m["fps_num"], m["fps_den"])
+    output_fps = getattr(args, "fps", None) or fps
     start_frame = math.floor(Fraction(str(args.start)) * fps)
     actual_start = float(Fraction(start_frame, 1) / fps)
     remaining = m["frames"] - start_frame
-    frame_limit = min(remaining, args.frames) if args.frames else remaining
+    available_frames = math.ceil(Fraction(remaining, 1) * output_fps / fps)
+    frame_limit = (
+        min(available_frames, args.frames) if args.frames else available_frames
+    )
     if frame_limit <= 0 and args.format != "ogv":
         raise ValueError("Start time is beyond the end of the video")
     # Theora duplicate packets may yield no decoded AVFrame. Reconstruct CFR
     # from timestamps, and preserve repeated trailing frames using the OMV table.
     timing = (
         f"fps=fps={m['fps_num']}/{m['fps_den']}:start_time=0,tpad=stop_mode=clone:stop=-1,"
-        f"trim=start_frame={start_frame},setpts=PTS-STARTPTS"
+        f"trim=start_frame={start_frame}:end_frame={m['frames']},setpts=PTS-STARTPTS"
     )
+    if output_fps != fps:
+        timing += f",fps=fps={output_fps}:start_time=0,tpad=stop_mode=clone:stop=-1"
     if args.format == "rgba":
         if os.name == "nt":
             import msvcrt
@@ -266,8 +291,10 @@ def convert(source, output, args):
         output = Path(output)
         if output.resolve() == Path(source).resolve():
             raise ValueError("Output must differ from source")
-        if output.exists():
+        if output.exists() and not getattr(args, "overwrite", False):
             raise FileExistsError(f"Output exists: {output}")
+        if output.exists() and output.is_dir():
+            raise IsADirectoryError(f"Output is a directory: {output}")
         output.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(
             prefix=output.stem + ".partial-", suffix=output.suffix, dir=output.parent
@@ -277,10 +304,18 @@ def convert(source, output, args):
     decoder = encoder = None
     count = 0
     try:
+        progress.phase("video decoding / encoding / finalizing", frame_limit)
         if args.format == "ogv":
+            total = m["size"] - m["ogg_offset"]
+            progress.phase("extracting payload", total, "bytes")
             with open(source, "rb") as src, open(tmp, "wb") as dst:
                 src.seek(m["ogg_offset"])
-                shutil.copyfileobj(src, dst, 1024 * 1024)
+                copied = 0
+                while chunk := src.read(1024 * 1024):
+                    dst.write(chunk)
+                    copied += len(chunk)
+                    progress.update(copied)
+                progress.render()
         elif args.format == "mp4" and m["mode"] == 2:
             # Native YUV path: no RGB round trip, no Python frame copying.
             cmd = input_args(m, args.start, args, encoding=True)
@@ -291,7 +326,7 @@ def convert(source, output, args):
                 "pad=ceil(iw/2)*2:ceil(ih/2)*2,setsar=1," + pixel_filter(args)
             )
             cmd += ["-vf", vf] + mp4_args(args) + ["-y", str(tmp)]
-            run_checked(cmd)
+            run_checked(cmd, progress)
         elif args.format == "ffv1" and m["mode"] == 2:
             # Preserve decoded YUV samples exactly, including 4:4:4 chroma.
             cmd = input_args(m, args.start, args)
@@ -317,7 +352,7 @@ def convert(source, output, args):
                 "-y",
                 str(tmp),
             ]
-            run_checked(cmd)
+            run_checked(cmd, progress)
         else:
             if args.format != "rgba":
                 enc = [
@@ -334,7 +369,7 @@ def convert(source, output, args):
                     "-video_size",
                     f"{m['output_width']}x{m['output_height']}",
                     "-framerate",
-                    f"{m['fps_num']}/{m['fps_den']}",
+                    str(output_fps),
                     "-i",
                     "pipe:0",
                     "-an",
@@ -357,9 +392,7 @@ def convert(source, output, args):
                         "-pix_fmt",
                         "bgra",
                     ]
-                encoder = subprocess.Popen(
-                    enc + [str(tmp)], stdin=subprocess.PIPE, env=external_env()
-                )
+                encoder = progress.spawn(enc + [str(tmp)], stdin=subprocess.PIPE)
                 sink = encoder.stdin
             cmd = input_args(m, args.start, args)
             cmd += [
@@ -375,7 +408,11 @@ def convert(source, output, args):
                 "rawvideo",
                 "pipe:1",
             ]
-            decoder = subprocess.Popen(cmd, stdout=subprocess.PIPE, env=external_env())
+            decoder = (
+                subprocess.Popen(cmd, stdout=subprocess.PIPE, env=external_env())
+                if encoder
+                else progress.spawn(cmd, stdout=subprocess.PIPE)
+            )
             shape = (3, m["theora_height"], m["theora_width"])
             size = int(np.prod(shape))
             while True:
@@ -402,9 +439,10 @@ def convert(source, output, args):
                 raise RuntimeError("FFmpeg decoder failed")
             if encoder:
                 encoder.stdin.close()
-                if encoder.wait():
+                if progress.wait(encoder):
                     raise RuntimeError("FFmpeg encoder failed")
             else:
+                progress.wait(decoder)
                 sink.flush()
             if not count:
                 raise RuntimeError("No video frames decoded")
@@ -416,12 +454,18 @@ def convert(source, output, args):
                     args.format,
                     args.audio,
                     actual_start,
-                    Fraction(frame_limit * m["fps_den"], m["fps_num"]),
+                    Fraction(frame_limit, 1) / output_fps,
                     media["streams"],
+                    progress,
                 )
-            # Atomic no-clobber publication on Windows and POSIX (same filesystem).
-            os.link(tmp, output)
-            tmp.unlink()
+            progress.phase("publishing completed file")
+            # Publish atomically. The default hard-link path refuses a race/overwrite;
+            # --overwrite intentionally uses replace after the complete temp file exists.
+            if getattr(args, "overwrite", False):
+                os.replace(tmp, output)
+            else:
+                os.link(tmp, output)
+                tmp.unlink()
         print(
             f'OK: {output or "stdout"}; streamed frames={count or "native ffmpeg/extract"}',
             file=sys.stderr,
@@ -431,6 +475,8 @@ def convert(source, output, args):
             if child and child.poll() is None:
                 child.kill()
                 child.wait()
+            if child in progress.readers:
+                progress.wait(child)
         if tmp and tmp.exists():
             tmp.unlink()
 

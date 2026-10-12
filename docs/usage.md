@@ -43,6 +43,7 @@ INPUT 可以是一个 `.omv` 文件或目录。单文件默认输出 MP4，OUTPU
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `-o, --output` | 必填 | 输出文件或目录 |
+| `--overwrite` | 关闭 | convert 专用；完整写入临时文件后替换已有输出，输入文件不会被覆盖 |
 | `--format mp4/ffv1` | mp4 | MP4 / 无损 FFV1 MKV |
 | `--codec h264/hevc/av1` | h264 | MP4 视频编码；FFV1 不使用 |
 | `--encoder` | software | software、auto、nvenc、qsv、amf、vaapi、videotoolbox 或对应 FFmpeg 编码器名 |
@@ -51,10 +52,12 @@ INPUT 可以是一个 `.omv` 文件或目录。单文件默认输出 MP4，OUTPU
 | `--bitrate` | 无 | 目标视频码率，例如 8M；与 crf/quality 互斥 |
 | `--preset` | 随编码器 | 编码速度/压缩预设，见下表 |
 | `--encode-device` | 驱动默认 | NVENC GPU 序号、QSV 设备或 VAAPI render node |
-| `--hwaccel` | none | FFmpeg 输入硬件加速；Theora 通常仍用 CPU |
-| `--hwaccel-device` | 无 | FFmpeg 输入加速设备；须同时指定 hwaccel |
+| `--hwaccel` | none | 允许 none/auto/cuda/qsv/d3d11va/dxva2/vaapi/videotoolbox/vulkan；平台含义见下表 |
+| `--hwaccel-device` | 无 | 传给 FFmpeg 的输入设备，例如 CUDA 的 0、VAAPI 的 /dev/dri/renderD128；须同时指定 hwaccel |
 | `--start SECONDS` | 0 | 从指定秒开始，须非负有限数 |
-| `--frames COUNT` | 全部剩余帧 | 输出帧数上限，须正整数 |
+| `--frames COUNT` | 全部剩余帧 | 输出帧数上限，例如 150；须正整数，指定 fps 后按输出帧数计算 |
+| `--fps RATE` | 源帧率 | 仅 convert；例如 24、30、60、29.97、30000/1001；大于 0 且不超过 1000 |
+| `--no-progress` | 不启用 | 关闭周期进度；convert/pipe/extract 可用，错误和完成信息仍保留 |
 | `--yuv-range full/limited` | full | mode 2 的输入范围；mode 0/1 不使用 |
 | `--matrix 601/709` | 601 | mode 2 的输入颜色矩阵；mode 0/1 不使用 |
 | `--alpha black/discard/preserve` | black | MP4 的透明处理；FFV1 始终保留 alpha |
@@ -75,7 +78,7 @@ omvtool convert movie.omv -o alternate.mp4 --yuv-range limited --matrix 709
 
 输出 MP4 使用 BT.709 limited-range YUV420p（保留 alpha 时为 YUVA420p），写入颜色标记和 faststart。
 奇数宽高补到偶数以兼容编码器/播放器，最多多一列或一行。FFV1 保持原可见尺寸。
-帧率使用 Theora 分子/分母，恢复重复帧并按 OMV 帧表控制总长度。
+默认帧率使用 Theora 分子/分母，恢复重复帧并按 OMV 帧表控制总长度。指定帧率时见下文。
 `--start` 向下取到最近视频帧边界，音频采用相同的实际起点，帧数上限不会超过剩余片长。
 为正确处理静止画面的 Theora 重复帧，会从头解码再裁切；大 start 值需要等待前段解码。
 
@@ -99,12 +102,12 @@ omvtool convert movie.omv -o linux.mp4 --codec hevc --encoder vaapi --encode-dev
 
 | 后端 | 默认质量/参数 | preset | 设备 |
 |---|---|---|---|
-| libx264 / libx265 | CRF 16 / 20，越小质量越高 | 默认 slow；ultrafast 到 veryslow | CPU |
+| libx264 / libx265 | CRF 16 / 20，越小质量越高 | 默认 slow；ultrafast/superfast/veryfast/faster/fast/medium/slow/slower/veryslow | CPU |
 | libsvtav1 | CRF 28 | 默认 6；0..13，越大越快，具体范围依本地版本 | CPU |
 | libaom-av1 | CRF 28，b:v=0 | 默认 6；0..8，映射 cpu-used | CPU |
 | NVENC | VBR CQ 20，b:v=0；quality 0..51，0 为自动 | 默认 p5；p1 最快到 p7 最慢 | encode-device 为非负 GPU 序号 |
 | QSV | global_quality 20，越小质量越高，0..51 | 默认 medium；veryfast/faster/fast/medium/slow/slower/veryslow | 可指定 qsv_device，格式取决于平台 |
-| AMF | CQP，I/P QP=20，越小质量越高；本工具 0..51 | 可传后端 quality 预设；不指定时采用 FFmpeg 默认 | 驱动默认 |
+| AMF | CQP，I/P QP=20，越小质量越高；本工具 0..51 | 典型值 speed/balanced/quality；可用值依编码器版本，不指定时采用 FFmpeg 默认 | 驱动默认 |
 | VAAPI | CQP，global_quality 20；0..51 | 不使用 preset | 默认 /dev/dri/renderD128；支持 encode-device |
 | VideoToolbox | q:v=65，0..100，越大质量越高 | 不使用 preset | 驱动默认；不允许软件回退 |
 
@@ -114,6 +117,93 @@ VideoToolbox 提供 H.264/HEVC，当前工具未配置其 AV1 后端。所有后
 
 **硬件解码与编码分别控制。** 输出硬件编码不要求输入硬件解码。常见显卡/FFmpeg 没有 Theora 硬件解码器，故这些 OMV 的解码通常仍由 CPU 完成，mode 0/1 颜色与 alpha 重建也在 CPU 进行。
 `--hwaccel auto` 交给 FFmpeg 尝试输入加速并按其策略回退；可显式选 cuda、qsv、d3d11va、dxva2、vaapi、videotoolbox、vulkan，不兼容时可能报错。滤镜使用软件帧，不构成全 GPU 零拷贝管线。FFV1 是软件无损编码，不与 codec/encoder/crf/quality/bitrate/preset/encode-device 组合。
+
+## 参数典型值与输入加速
+
+`--encoder` 可以是后端简称，也可以是下列完整名称；须与 `--codec` 匹配。
+
+| codec | 软件编码器 | 硬件编码器完整名称 |
+|---|---|---|
+| h264 | libx264 | h264_nvenc、h264_qsv、h264_amf、h264_vaapi、h264_videotoolbox |
+| hevc | libx265 | hevc_nvenc、hevc_qsv、hevc_amf、hevc_vaapi、hevc_videotoolbox |
+| av1 | libsvtav1、libaom-av1 | av1_nvenc、av1_qsv、av1_amf、av1_vaapi |
+
+`--hwaccel` 控制输入解码，与 `--encoder` 控制的输出编码独立。
+下表是本工具接受的全部值；被接受不代表当前 FFmpeg、驱动或输入编码支持。
+
+| 值 | 常见环境 / 含义 |
+|---|---|
+| none | 默认；不请求硬件解码 |
+| auto | 由 FFmpeg 尝试选择输入硬件加速 |
+| cuda | NVIDIA CUDA/NVDEC；设备常用 0、1 等 GPU 序号 |
+| qsv | Intel Quick Sync Video |
+| d3d11va | Windows Direct3D 11 视频解码 |
+| dxva2 | Windows DXVA2 视频解码 |
+| vaapi | Linux VA-API；设备例如 /dev/dri/renderD128 |
+| videotoolbox | macOS VideoToolbox |
+| vulkan | FFmpeg Vulkan 解码；取决于驱动及具体编码 |
+
+这批 OMV 是 Theora，通常仍由 CPU 解码。只想使用显卡编码时，保留默认
+`--hwaccel none`，选择例如 `--encoder nvenc` 即可。显式请求不兼容的输入加速
+可能报错；不支持 `--hwaccel-output-format`，当前重建/滤镜流程使用软件帧。
+
+设备参数没有跨后端统一的命名格式。`--encode-device 0` 是 NVENC GPU 序号；
+VAAPI 可用 `--encode-device /dev/dri/renderD128`，QSV 原样传给 `-qsv_device`，
+其设备格式依平台。`--hwaccel-device` 原样传给输入的 `-hwaccel_device`。
+本机可查询 `ffmpeg -hwaccels`、`ffmpeg -h encoder=hevc_nvenc` 等；
+`omvtool doctor --test-encoders` 会实际检查编码能力。
+
+质量/速度常用例子：H.264 `--crf 16 --preset slow`，HEVC `--crf 20 --preset slow`，
+AV1/SVT `--crf 28 --preset 6`，NVENC `--quality 18 --preset p6`，QSV
+`--quality 20 --preset medium`，AMF `--preset balanced --bitrate 8M`。
+`--bitrate` 允许正数并可带 k/M/G 后缀，例如 8000000、4000k、8M、1.5M；
+crf、quality、bitrate 三选一，auto 仅接受默认质量或 bitrate。
+
+无值开关还有 `inspect --json`、`doctor --test-encoders`、`diagnose --consent`；
+各子命令可用 `--help`，版本查询为 `omvtool --version`。
+
+## 指定输出帧率
+
+```console
+omvtool convert movie.omv -o movie_60.mp4 --fps 60
+omvtool convert movie.omv -o movie_ntsc.mp4 --fps 30000/1001
+omvtool convert movie.omv -o clip.mp4 --fps 24 --start 30 --frames 240
+omvtool convert effect.omv -o effect_60.mkv --format ffv1 --fps 60
+```
+
+`--fps` 仅用于 convert，支持 MP4 和 FFV1。它按时间戳重复或丢弃帧，不是运动
+插帧，也不是修改播放速度。音频不变速；`--start` 仍按源帧率向下对齐，
+`--frames` 则限制输出帧数，例中 240 帧 / 24fps 为 10 秒，前提是源剩余时长足够。
+完整输出帧数为 `ceil(源剩余帧数 × 输出帧率 / 源帧率)`，末尾必要时重复最后一帧，
+因此视频时长最多增加不足一个输出帧间隔。音频按该输出时长裁切，不补出额外音频。
+
+`29.97` 与 `30000/1001` 并不完全相等，要求精确匹配时使用分数。
+不指定则保留源有理数帧率。FFV1 在调帧率后仍保存所选解码像素，但主动丢弃的帧
+无法从输出恢复。`pipe`、`extract` 不接受 fps：前者保留源帧率，后者复制原码流。
+
+默认已有输出会报错（目录批处理会跳过），以避免误覆盖。需要替换已有文件时显式
+加 `--overwrite`；程序仍拒绝输出路径与输入相同，并在完整编码成功后才替换目标。
+中途失败不会用不完整文件替换旧文件。
+
+## 处理进度
+
+默认每秒向 stderr 显示当前阶段、已耗时；视频阶段另显示已编码帧数/目标帧数、
+百分比、平均处理速度和预计剩余时间，音频合入阶段按输出时间显示进度。
+输入检查、编码器探测、视频解码/编码/收尾、音频合入和完成文件发布均有阶段提示。
+提取显示已复制字节数。批量任务还显示当前文件序号/文件总数。
+
+进度反映当前阶段，不是整个批次的总百分比。ETA 是阶段平均速度的估算；开始
+裁切前段解码、编码器缓冲或 MP4 faststart 收尾时帧数可能暂不增长，但仍显示耗时。
+完成帧数达到 100% 后可能还需要合入音频和写容器，最终以 `OK` 为完成标志。
+
+```console
+omvtool convert movie.omv -o movie.mp4 --no-progress
+omvtool extract movie.omv -o original.ogv --no-progress
+```
+
+进度不混入 stdout，可安全连接 RGBA 二进制管道。`--no-progress` 关闭周期进度及
+阶段进度，仍显示输入、编码器、错误、批量序号和最终结果。日志重定向例如
+`omvtool convert movie.omv -o movie.mp4 2> conversion.log`。
 
 ## 透明通道
 

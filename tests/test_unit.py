@@ -206,6 +206,10 @@ class LayoutTests(unittest.TestCase):
             ["convert", "x", "-o", "y.mp4", "--start", "nan"],
             ["convert", "x", "-o", "y.mp4", "--frames", "0"],
             ["convert", "x", "-o", "y.mp4", "--crf", "52"],
+            *(
+                ["convert", "x", "-o", "y.mp4", "--fps", value]
+                for value in ("0", "-1", "nan", "inf", "1/0", "1001")
+            ),
         ):
             with (
                 self.subTest(args=args),
@@ -214,6 +218,14 @@ class LayoutTests(unittest.TestCase):
             ):
                 main(args)
             self.assertEqual(caught.exception.code, 2)
+
+    def test_overwrite_is_convert_only(self):
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            main(["pipe", "x", "--overwrite"])
+        self.assertEqual(caught.exception.code, 2)
 
 
 if __name__ == "__main__":

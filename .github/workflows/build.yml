@@ -101,7 +101,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create GitHub release draft
+    name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, source, integration, compatibility]
     runs-on: ubuntu-24.04
@@ -125,6 +125,11 @@ jobs:
           assert len(assets) == 8, [p.name for p in assets]
           lines = [f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in assets]
           (root / 'SHA256SUMS').write_text(''.join(lines), encoding='ascii')
-      - name: Create draft with all assets
+      - name: Publish release with all assets
         shell: bash
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --draft --verify-tag --generate-notes --title "OMVTool $GITHUB_REF_NAME"
+        run: |
+          options=(--verify-tag --generate-notes --title "OMVTool $GITHUB_REF_NAME")
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" release-assets/* "${options[@]}"

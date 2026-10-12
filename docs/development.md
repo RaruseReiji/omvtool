@@ -40,6 +40,7 @@ src/omvtool/
   header.py       OMV/Theora 结构读取
   converter.py    平面重建、FFmpeg 流式转换、内嵌音频
   encoding.py     软件/硬件编码参数、实际编码探测
+  progress.py     stderr 阶段/帧数/耗时/ETA 进度与 FFmpeg 进度读取
   diagnostics.py  显式同意后的本地结构报告，无网络上传
   runtime.py      外部程序定位、冻结运行时环境处理
 tests/            可公开的合成/单元测试
@@ -80,3 +81,18 @@ python -m unittest discover -s tests -v
 ```
 
 HEVC alpha 集成测试按当前 FFmpeg 的实际能力分别验证成功往返或安全拒绝；本机构建若缺少 x265 alpha，不能将失败分支通过说成实际 alpha 编码已通过。单元测试另检查透明度渐变与不透明回退。二进制包只附 usage/format/references；开发说明保留在源码中，docs/release.md 为被忽略的本地发布备忘。
+
+## 提交内容与自动发布
+
+`tests/` 需要提交到远程仓库，CI 在 checkout 后依赖它运行单元和合成媒体测试。
+里面只有测试代码，不包含游戏视频或本地测试产物；临时样本由测试运行时生成并清理。
+`.gitignore` 已排除 build/dist/release、缓存与媒体文件，二进制发布包不携带 tests，
+源码包保留 tests 便于复现验证。不要将整个 tests 目录加入 gitignore。
+
+`.github/workflows/build.yml` 在推送 `v*` 标签后，等待六平台构建、源码打包、
+集成测试和最低 Python 版本检查全部通过，再自动发布 GitHub Release，附平台包、
+Python 包和校验和。标签必须与包版本一致，例如 v0.6.0；含连字符的标签发布为
+prerelease。普通分支 push、PR、手动运行只测试/构建。不会自动提交代码或创建标签。
+可先提交并推送代码，再执行 `git tag v0.6.0`、`git push origin v0.6.0`。
+无需额外 PAT，release job 使用仓库 GITHUB_TOKEN 的 contents: write 权限。
+参考 [gh release create](https://cli.github.com/manual/gh_release_create)。
