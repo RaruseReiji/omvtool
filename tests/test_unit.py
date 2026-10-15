@@ -190,6 +190,23 @@ class LayoutTests(unittest.TestCase):
             np.array_equal(unpack(p, m, matrix="601"), unpack(p, m, matrix="709"))
         )
 
+    def test_omvlib_full601_truncation(self):
+        # Values distinguish the viewer's truncation from nearest rounding.
+        planes = np.array([[[100]], [[129]], [[130]]], dtype=np.uint8)
+        meta = {"mode": 2, "output_height": 1, "output_width": 1}
+        np.testing.assert_array_equal(unpack(planes, meta)[0, 0], [102, 98, 101, 255])
+        # Scalar reference reconstructed from OMVLib's double-precision LUT.
+        planes = np.random.default_rng(315).integers(
+            0, 256, (3, 1, 4096), dtype=np.uint8
+        )
+        meta["output_width"] = 4096
+        expected = []
+        for yy, uu, vv in planes[:, 0, :].T:
+            y, u, v = int(yy), int(uu) - 128, int(vv) - 128
+            channels = (y + v * 1.402, (y - u * 0.34414) - v * 0.71414, y + u * 1.772)
+            expected.append([max(0, min(255, int(c))) for c in channels] + [255])
+        np.testing.assert_array_equal(unpack(planes, meta)[0], expected)
+
     def test_raw_reader_rejects_partial_frame(self):
         self.assertEqual(read_frame(io.BytesIO(b"abcd"), 4), b"abcd")
         self.assertIsNone(read_frame(io.BytesIO(), 4))

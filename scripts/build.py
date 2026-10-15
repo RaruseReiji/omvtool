@@ -122,7 +122,13 @@ def main():
     ):
         shutil.copy2(ROOT / file, stage / file)
     (stage / "docs").mkdir()
-    for file in ("usage.md", "format.md", "references.md"):
+    for file in (
+        "usage.md",
+        "format.md",
+        "references.md",
+        "termux.md",
+        "official-kit-analysis.md",
+    ):
         shutil.copy2(ROOT / "docs" / file, stage / "docs" / file)
     # Repository development links are not relevant to a binary distribution.
     readme = stage / "README.md"

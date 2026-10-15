@@ -1,6 +1,7 @@
 # 格式与验证结论
 
-检查日期：2026-10-12。以下是已检查样本和公开源码支持的结论，不是 OMV 官方规范。
+检查日期：2026-10-15。以下是已检查样本、公开源码与 OMVLib 静态核对支持的结论，不是全版本 OMV 官方规范。
+新增证据与适用边界见 [Siglus 套件与 OMVLib 核对](official-kit-analysis.md)。
 
 ## 外壳和压缩格式
 
@@ -74,7 +75,10 @@ full/limited 标志；其已定义 Rec.470 色彩约定使用 BT.601 系数和�
 但这些样本没有声明采用那些约定。mode 0/1 更是借用了三个平面保存 BGR/alpha，
 不能用普通 YUV 规则解释。
 
-mode 2 默认采用 full / 601，依据是 SiglusExtract 所附
+mode 2 默认采用 full / 601，直接依据新增的 [OMVLib 查表函数分析](official-kit-analysis.md#色彩与取整)：
+它使用全范围、1.402/1.772/0.34414/0.71414 系数及向零截断。
+RGBA 管道默认按该规则重建；MP4 继续直接转换 YUV，FFV1 保留解码 YUV 样本。
+此前的依据是 SiglusExtract 所附
 [Color2.h 的转换实现](https://github.com/xmoezzz/SiglusExtract/blob/5ac65650e8141bb5cabaaf2a5ab55aec0a8d43b8/tools/src/png2theora/png2theora/Color2.h)：
 其公式采用接近 BT.601 的系数，没有将 Y 映射到 16–235 的步骤。样本也出现
 接近 0–255 的亮度分布。这是源码和样本支持的兼容性选择，**不是文件头声明，

@@ -5,7 +5,15 @@ lossless FFV1/MKV output, and support for BGR, packed BGR+alpha and YUV layouts.
 It preserves rational frame rates and repeated frames without intermediate PNGs.
 Embedded audio tracks are retained when present.
 
+Current version: **0.6.1**. Static analysis of the referenced OMVLib confirms its
+mode 0/1/2 branches and full-range mode-2 RGB lookup. Default RGBA reconstruction
+now follows its double-precision coefficients and truncation. This does not establish
+support for every engine version; see the [analysis report](docs/official-kit-analysis.md).
+
 ## Quick start
+
+Android/Termux users should use the Python source/wheel with Termux dependencies;
+the Linux ARM64 executable requires glibc. See [Termux setup](docs/termux.md).
 
 OMVTool requires **FFmpeg and ffprobe**. Download them from the [official FFmpeg
 page](https://ffmpeg.org/download.html). On Windows, the builds at [gyan.dev](https://www.gyan.dev/ffmpeg/builds/),

@@ -2,7 +2,7 @@
 
 将 **SiglusEngine `.omv`** 流式转换为 H.264、HEVC、AV1 MP4 或无损 MKV，正确处理 BGR、BGR+alpha 和 YUV 三种存储模式，无需中间 PNG。
 
-支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.6.0**。
+支持软件与硬件编码、透明度保存、原始 Ogg 提取、标准 RGBA stdout、多内嵌音轨和目录批量转换。当前版本 **0.6.1**。
 
 ## 快速开始
 
@@ -68,3 +68,10 @@ MP4 为有损输出；FFV1 保存的是 Theora **解码后**的像素，不能�
 硬件编码支持 NVENC、QSV、AMF、VAAPI、VideoToolbox，具体取决于 FFmpeg 构建、显卡和驱动。Theora 输入通常由 CPU 解码，颜色/alpha 重建也在 CPU 完成。用 `omvtool doctor --test-encoders` 可实际试编码；编译进 FFmpeg 不等于本机可用。
 
 感谢 [xmoezzz/omvdecoder](https://github.com/xmoezzz/omvdecoder)、[SiglusExtract](https://github.com/xmoezzz/SiglusExtract)、[SiglusSceneScriptUtility](https://github.com/Jirehlov/SiglusSceneScriptUtility) 等项目提供的格式和实现参考，详见[参考来源](docs/references.md)。MIT 许可证；第三方运行库另见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+
+## 格式核对与 Termux
+
+OMVLib 静态分析确认该版本的 0/1/2 三种模式，以及 mode 2 的全范围色彩转换和截断取整规则；未发现其他模式，但不能外推所有引擎版本。详见[核对报告](docs/official-kit-analysis.md)。
+
+Android/Termux 使用 Python 源码或 wheel，Linux ARM64 可执行包不兼容 Android Bionic；安装及共享存储说明见 [Termux 指南](docs/termux.md)。

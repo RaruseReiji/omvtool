@@ -35,3 +35,8 @@ Livscrit、lunaswd 的新增变更为 README/CI；killvxk/omvdecoder-xmoezzz 落
 没有发现相关解码修复。fork 状态会变化，这只是当次可见范围。
 
 第三方软件保留各自许可证，见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+
+[SiglusEngineOfficialKit](https://codeberg.org/VisualArts/SiglusEngineOfficialKit)
+提交 d8d1f3d4b7066eb36ff2439498bedf69c6e967cd 中的 OMVLib 和手册提供了三模式、
+alpha 与全范围 YUV 转换的直接核对材料。感谢该套件的整理与分享；样本哈希、
+函数地址、取整差异及适用边界见 [OMVLib 核对报告](official-kit-analysis.md)。

@@ -7,6 +7,8 @@ from fractions import Fraction
 import math
 import json
 import os
+import errno
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +19,39 @@ from .header import inspect, UnsupportedFormat
 from .runtime import executable, external_env
 from .encoding import select_encoder, video_args, pixel_filter, device_args, probe_alpha
 from .progress import Progress
+
+
+def publish_output(tmp, output, overwrite=False):
+    """Publish a complete file; exclusive copying supports Android/shared storage."""
+    if overwrite:
+        os.replace(tmp, output)
+        return
+    link = getattr(os, "link", None)
+    if link is not None:
+        try:
+            link(tmp, output)
+        except OSError as exc:
+            if exc.errno not in (
+                errno.EPERM,
+                errno.ENOSYS,
+                errno.EOPNOTSUPP,
+                errno.EXDEV,
+            ):
+                raise
+        else:
+            tmp.unlink()
+            return
+    # Exclusive creation still refuses existing destinations. Unlike a hard link,
+    # the destination is visible during copying on filesystems without links.
+    with open(output, "xb") as dest:
+        try:
+            with open(tmp, "rb") as source:
+                shutil.copyfileobj(source, dest)
+        except BaseException:
+            dest.close()
+            Path(output).unlink(missing_ok=True)
+            raise
+    tmp.unlink()
 
 
 def layout(path, force_mode=None):
@@ -66,7 +101,8 @@ def unpack(planes, meta, yuv_range="full", matrix="601"):
     if mode in (0, 1):
         rgba[:, :, :3] = p[::-1].transpose(1, 2, 0)
     else:
-        y, u, v = p.astype(np.float32)
+        official = yuv_range == "full" and matrix == "601"
+        y, u, v = p.astype(np.float64 if official else np.float32)
         u -= 128
         v -= 128
         if yuv_range == "limited":
@@ -75,9 +111,15 @@ def unpack(planes, meta, yuv_range="full", matrix="601"):
             v *= 255 / 224
         if matrix == "709":
             rgb = (y + 1.5748 * v, y - 0.187324 * u - 0.468124 * v, y + 1.8556 * u)
+        elif official:
+            # OMVLib LUT (0x416eb0): binary64 arithmetic, CVTTSD2SI truncation.
+            rgb = (y + 1.402 * v, (y - 0.34414 * u) - 0.71414 * v, y + 1.772 * u)
         else:
             rgb = (y + 1.402 * v, y - 0.344136 * u - 0.714136 * v, y + 1.772 * u)
-        rgba[:, :, :3] = np.stack(rgb, axis=2).round().clip(0, 255).astype(np.uint8)
+        values = np.stack(rgb, axis=2)
+        if not official:
+            values = values.round()
+        rgba[:, :, :3] = values.clip(0, 255).astype(np.uint8)
     if mode == 1:
         # Each plane contains H color rows, followed by ceil(H/3) alpha rows.
         rgba[:, :, 3] = planes[:, h:, :].reshape(-1, meta["output_width"])[:h]
@@ -459,13 +501,7 @@ def _convert(source, output, args, progress):
                     progress,
                 )
             progress.phase("publishing completed file")
-            # Publish atomically. The default hard-link path refuses a race/overwrite;
-            # --overwrite intentionally uses replace after the complete temp file exists.
-            if getattr(args, "overwrite", False):
-                os.replace(tmp, output)
-            else:
-                os.link(tmp, output)
-                tmp.unlink()
+            publish_output(tmp, output, getattr(args, "overwrite", False))
         print(
             f'OK: {output or "stdout"}; streamed frames={count or "native ffmpeg/extract"}',
             file=sys.stderr,
